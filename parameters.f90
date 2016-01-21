@@ -1,17 +1,18 @@
 module parameters
-  ! DG solver parameters
-  integer,parameter::nx=200
+  ! solver parameters
+  integer,parameter::nx=1000
   integer,parameter::nvar=3
   integer,parameter::riemann=2
   logical,parameter::use_limiter=.true.
+  character(LEN=3),parameter::solver='EQL' !or EQL to use the equilibrium solution ^^
 
   ! Problem set-up
   integer,parameter::ninit=1
-  integer,parameter::bc=2
+  integer,parameter::bc=3
   integer,parameter::nequilibrium=1
 
-  real(kind=8)::tend=5
-  real(kind=8)::boxlen=2.0
+  real(kind=8)::tend=1
+  real(kind=8)::boxlen=1.0
   real(kind=8)::gamma=1.4
 
 end module parameters
