@@ -7,9 +7,9 @@ module parameters
   character(LEN=3),parameter::solver='EQL' !or EQL to use the equilibrium solution ^^
 
   ! Problem set-up
-  integer,parameter::ninit=1
+  integer,parameter::ninit=3
   integer,parameter::bc=3
-  integer,parameter::nequilibrium=1
+  integer,parameter::nequilibrium=3
 
   real(kind=8)::tend=1
   real(kind=8)::boxlen=1.0
