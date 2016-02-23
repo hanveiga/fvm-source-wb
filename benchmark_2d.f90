@@ -76,7 +76,7 @@
         w(2,:,:) = 0
         w(3,:,:) = 0
         w(4,:,:) = p_0*exp(-(rho_0*g/p_0)*(x+y))+eta*&
-                 &exp(-(rho_0*g/p_0)*((x-0.3)**2+(y-0.3)**2))
+                 &exp(-100*(rho_0*g/p_0)*((x-0.3)**2+(y-0.3)**2))
 
       case(4)
         do i = 1,size_x
@@ -135,7 +135,7 @@
        ycell = y_values(icell,jcell)
        call get_equilibrium_solution([xcell],[ycell],w_eq,one,one)
        call compute_primitive(function_values(1:nvar,icell,jcell),w,one,one)
-       write(10,'(7(1PE12.5,1X))')xcell,ycell,(w,ivar=4,nvar)
+       write(10,'(7(1PE12.5,1X))')xcell,ycell,(w(ivar)-w_eq(ivar),ivar=4,nvar)
       end do
     end do
     close(10)
@@ -170,6 +170,7 @@
     !ww(3,:,:)/(gamma-1.0)+0.5*ww(1,:,:)*ww(2,:,:)**2
   end subroutine compute_conservative
   !-------------
+
   subroutine get_equilibrium_solution(x,y,w, size_x,size_y)
     ! get equilibrium solution for primitive variables
     ! use parameters
@@ -221,7 +222,7 @@
     use parameters_2d
     implicit none
 
-    real(kind=8),dimension(1:nvar,1:nx,1:ny)::u,u_new,u_eq
+    real(kind=8),dimension(1:nvar,1:nx,1:ny)::u,u_eq
 
     ! internal variables
     real(kind=8)::t,dt
@@ -235,16 +236,17 @@
     t=0
     iter=0
     do while(t < tend)
+    !do while(iter<500)
        ! Compute time step
        call compute_max_speed(u,cmax)
-       dt=0.8*dx/cmax*cfl
+       dt=0.5*dx/cmax*cfl
        
        !if(solver=='EQL')then
          ! runge kutta 2nd order
-        call compute_update(u,u_eq, dudt)
+        call compute_update_exact(u,u_eq, dudt)
         w1=u+dt*dudt
         !call dirichlet(w1)
-        call compute_update(w1,u_eq,dudt)
+        call compute_update_exact(w1,u_eq,dudt)
         u=0.5*u+0.5*w1+0.5*dt*dudt
         !fcall dirichlet(u)
        !endif
@@ -254,7 +256,7 @@
        write(*,*)'time=',iter,t,dt, cmax
     end do
 
-    u_new = u
+    !u_new = u
   end subroutine evolve
 
   !-----
@@ -322,25 +324,25 @@
 
   end subroutine compute_flux
 
-  subroutine get_source(w,s,x,y,size_x,size_y)
+  subroutine get_source(w,s,size_x,size_y)
     use parameters_2d
     implicit none
     integer::size_x, size_y
     real(kind=8),dimension(1:nvar,1:size_x,1:size_y)::u,s
     real(kind=8),dimension(1:nvar,1:size_x,1:size_y)::w
-    real(kind=8),dimension(1:size_x,1:size_y)::x
-    real(kind=8),dimension(1:size_x,1:size_y)::y
-
+    !real(kind=8),dimension(1:size_x,1:size_y)::x
+    !real(kind=8),dimension(1:size_x,1:size_y)::y
+    real(kind=8)::phi_x,phi_y
     !internal
-
+    phi_x = 1.
+    phi_y = 1.
     !x_minus = [x(1),x(1:size-1)] ! zero gradient
     !x_plus = [x(2:size),x(size)] ! zero gradient
 
     s(1,:,:) = 0.
-    s(2,:,:) = -w(1,:,:)*1
-    s(3,:,:) = 0.
-    s(4,:,:) = -w(1,:,:)*sqrt(w(2,:,:)**2+w(3,:,:)**2)
-
+    s(2,:,:) = -w(1,:,:)*phi_x
+    s(3,:,:) = -w(1,:,:)*phi_y
+    s(4,:,:) = -w(1,:,:)*(w(2,:,:)*phi_x+w(3,:,:)*phi_y)
     !s(1) = 0
     !  s(2) = -w(1)*1*(x_plus-x_minus)/(2*delta)
     !  s(3) = -w(1)*w(2)*1*(x_plus-x_minus)/(2*delta)
@@ -368,7 +370,7 @@
   subroutine compute_update(u, w_eq, dudt)
     use parameters_2d
     implicit none
-    real(kind=8),dimension(1:nvar,1:nx, 1:ny)::u, w_eq, dudt
+    real(kind=8),dimension(1:nvar,1:nx, 1:ny)::u, w_eq, dudt, w, s
     real(kind=8),dimension(1:nvar,1:nx, 1:ny)::u_top, u_bottom 
     real(kind=8),dimension(1:nvar,1:nx, 1:ny)::u_left, u_right
     real(kind=8),dimension(1:nvar,1:nx, 1:ny,2)::flux_top, flux_bottom  
@@ -410,10 +412,10 @@
       ileft = iface-1
       iright = iface
       if (iface == 1) then
-        ileft = nx
+        ileft = 1
       end if
       if (iface == nx+1) then
-        iright = 1
+        iright = ny
       end if
 
         ! subroutine compute_llflux(uleft,uright, f_left,f_right, fgdnv)
@@ -428,10 +430,10 @@
         ileft = jface-1
         iright = jface
         if (jface == 1) then
-          ileft = ny
+          ileft = 1
         end if
         if (jface == ny+1) then
-          iright = 1
+          iright = ny
         end if
 
        call compute_llflux(u_top(1:nvar,i,ileft),u_bottom(1:nvar,i,iright),&
@@ -439,193 +441,179 @@
       end do
     end do
 
+    ! compute source
+    call compute_primitive(u,w,nx,ny)
+    call get_source(w,s,nx,ny)
+
     do i = 1 ,nx
       do j = 1 ,ny 
         dudt(1:nvar,i, j) =  -(F(1:nvar,i+1,j)-F(1:nvar,i,j))*oneoverdx &
-          &-(G(1:nvar,i,j+1)-G(1:nvar,i,j))*oneoverdy !+ s(1:nvar,1:nx, 1:ny)
+          &-(G(1:nvar,i,j+1)-G(1:nvar,i,j))*oneoverdy + s(1:nvar,i,j)
     end do
     end do
     write(*,*) dudt(1,2,2)
+
+    dudt(:,1,:) = 0.
+    dudt(:,nx,:) = 0.
+    dudt(:,:,1) = 0.
+    dudt(:,:,ny) = 0.
   !+ s(1:nvar,1:nx) + &
   !        & (flux_eq(1:nvar,2:(nx+1),1:ny)-flux_eq(1:nvar,1:nx,1:ny))*oneoverdx - s_eq(1:nvar,1:nx) &
 
   end subroutine compute_update
 
-  subroutine compute_update_old(u, w_eq, dudt)
+  subroutine compute_update_exact(u, w_eq, dudt)
     use parameters_2d
     implicit none
-    real(kind=8),dimension(1:nvar,1:nx, 1:ny)::u, w_eq, dudt
+    real(kind=8),dimension(1:nvar,1:nx, 1:ny)::u, w_eq, dudt, w, s, s_eq
+    real(kind=8),dimension(1:nvar,1:nx, 1:ny)::delta_w, delta_u, u_eq
+    real(kind=8),dimension(1:nvar,1:nx, 1:ny)::u_top, u_bottom 
+    real(kind=8),dimension(1:nvar,1:nx, 1:ny)::u_left, u_right
+    real(kind=8),dimension(1:nvar,1:nx, 1:ny,2)::flux_top, flux_bottom  
+    real(kind=8),dimension(1:nvar,1:nx, 1:ny,2)::flux_right, flux_left
+    real(kind=8),dimension(1:nvar,1:nx, 1:ny,2)::flux
+    real(kind=8),dimension(1:nvar,1:nx,1:(ny+1))::G
+    real(kind=8),dimension(1:nvar,1:(nx+1),1:ny)::F
+    real(kind=8),dimension(1:nvar,1:nx+1,1:(ny+1),2)::G_eq
+    real(kind=8),dimension(1:nvar,1:(nx+1),1:ny+1,2)::F_eq
+    real(kind=8),dimension(1:nvar,1:(nx+1), 1:ny+1)::u_x_faces, w_x_faces
+    real(kind=8),dimension(1:nvar,1:nx+1, 1:(ny+1))::u_y_faces, w_y_faces
+    real(kind=8),dimension(1:(nx+1), 1:ny+1)::x_faces
+    real(kind=8),dimension(1:nx+1, 1:(ny+1))::y_faces
+    real(kind=8),dimension(1:nx+1, 1:ny+1)::x,y
+    real(kind=8)::dx,dy, oneoverdy, oneoverdx
+    integer::j,ileft,iright,itop,ibottom,i
+    integer::iface, jface
 
     ! internal vars
-    real(kind=8),dimension(1:nvar,1:nx, 1:ny)::delta_w, f_left, f_right
-    real(kind=8),dimension(1:nvar,1:nx, 1:ny)::g_top, g_bottom
-    real(kind=8),dimension(1:nvar)::flux_r, flux_g
-    real(kind=8),dimension(1:(nx+1),1:(ny+1))::x_faces, y_faces
-    real(kind=8),dimension(1:nx,1:ny)::x, y
-    real(kind=8),dimension(1:nvar,1:(nx+1),1:ny)::u_eq_faces_x, w_eq_faces_x
-    real(kind=8),dimension(1:nvar,1:(nx+1),1:ny)::flux_eq_x, flux_riemann
-    real(kind=8),dimension(1:nvar,1:nx,1:(ny+1))::u_eq_faces_y, w_eq_faces_y, flux_eq_y,g_flux
-
-    real(kind=8),dimension(1:nvar, 1:nx, 1:ny)::u_left,u_right, u_top, u_bottom, u_eq
-    real(kind=8),dimension(1:nvar,1:nx,1:ny)::s,s_eq
-    real(kind=8)::oneoverdx, dx, dt, dx_plus, zero, xface, xcell, oneoverdy, dy
-    integer::one, i, nfaces, iface, ileft, iright, jface, itop, ibottom, jcell, icell,j
-    
     dx = boxlen_x/dble(nx)
     dy = boxlen_y/dble(ny)
+
     oneoverdx = 1/dx
     oneoverdy = 1/dy
-    nfaces = nx + 1
 
-    zero = 0
+    ! compute primitive variables for u
+    call compute_conservative(w_eq,u_eq,nx,ny)
 
-    ! compute perturbation
-    call compute_conservative(w_eq, u_eq, nx, ny)
+    ! get deltas (primitives)
+    delta_u = u - u_eq
 
-    delta_w = u - u_eq
+    ! get conservative of deltas
+    !call compute_conservative(delta_w, delta_u, nx, ny)
 
-    ! propagate perturbation to faces
-    ! create x_faces
-    ! create x
-    do j = 1,ny
-      do i = 1,nx
+    ! compute equilibrium function values at faces
+    do i=1,nx+1
+      do j = 1,ny+1
+        x_faces(i,j) = (i-1)*dx
+      end do
+    end do
+
+    do i=1,nx+1
+      do j = 1,ny+1
+        y_faces(i,j) = (j-1)*dx
+      end do
+    end do
+
+    do i=1,nx+1
+      do j = 1,ny+1
         x(i,j) = (i-0.5)*dx
-        y(j,j) = (j-0.5)*dy
+        y(i,j) = (j-0.5)*dy
       end do
     end do
 
-    do j = 1,ny
-      do i = 1,nfaces
-      x_faces(i,j) = (i-1)*dx
-      end do
-    end do
-    do j = 1,nfaces
-      do i = 1,nx
-      y_faces(i,j) = (j-1)*dy
-      end do
-    end do
+    call get_equilibrium_solution(x_faces, y, w_x_faces, nx+1, ny+1)
+    call get_equilibrium_solution(x, y_faces, w_y_faces, nx+1, ny+1)
+    call compute_conservative(w_x_faces, u_x_faces, nx+1, ny+1)
+    call compute_conservative(w_y_faces, u_y_faces, nx+1, ny+1)
 
-    ! x - direction
-    call get_equilibrium_solution(x_faces,y,w_eq_faces_x,nfaces,ny)
-    call compute_conservative(w_eq_faces_x, u_eq_faces_x, nfaces, ny)
+    !subroutine get_equilibrium_solution(x,y,w, size_x,size_y)
+    !write(*,*) w_x_faces
+    !write(*,*) u_x_faces
 
-    !u_left(1:nvar,1:nx,1:ny) = delta_w(1:nvar,1:nx,1:ny) + u_eq_faces_x(1:nvar,1:nx, 1:ny)
-    !u_right(1:nvar,1:nx,1:ny) = delta_w(1:nvar,1:nx,1:ny) + u_eq_faces_x(1:nvar,2:(nx+1), 1:ny)
-    write(*,*) 'u'
-    write(*,*) u(1,:,:)
+    u_left(:,:,:) = u_x_faces(1:nvar,1:nx,1:ny) + delta_u(1:nvar,1:nx,1:ny)
+    u_right(:,:,:) = u_x_faces(1:nvar,2:(nx+1),1:ny) + delta_u(1:nvar,1:nx,1:ny)
+
+    u_top(:,:,:) = u_y_faces(1:nvar,1:nx,2:(ny+1)) + delta_u(1:nvar,1:nx,1:ny)
+    u_bottom(:,:,:) = u_y_faces(1:nvar,1:nx,1:ny) + delta_u(1:nvar,1:nx,1:ny)
+
+    !write(*,*) 'delta_u'
+    !write(*,*) delta_u
+
+    ! fluxes
+    F(:,:,:) = 0.
+    G(:,:,:) = 0.
+
+    call compute_flux(u_left,flux_left,nx,ny)
+    call compute_flux(u_right,flux_right,nx,ny)
+    call compute_flux(u_top,flux_top,nx,ny)
+    call compute_flux(u_bottom,flux_bottom,nx,ny)
+    ! compute artificial flux in x direction
+    
     do j = 1, ny
-      do i = 1 , nx
-        if (i == 1) then
-          u_left(1:nvar,i,1:ny) = u(1:nvar,i,1:ny)
-          u_right(1:nvar,i,1:ny) = u(1:nvar,i+1,1:ny)
-          cycle
-        end if
-         ! u_right(1:nvar,i,1:ny) = u(1:nvar,i,1:ny)
-        if (i==nx) then
-           u_right(1:nvar,i,1:ny) = u(1:nvar,i,1:ny)
-           u_left(1:nvar,i,1:ny) = u(1:nvar, i, 1:ny)
-           cycle 
-        end if
-        u_left(1:nvar,i,1:ny) = u(1:nvar,i-1,1:ny)
-        u_right(1:nvar,i,1:ny) = u(1:nvar,i,1:ny)
-      end do 
+    do iface = 1, nx+1
+      ileft = iface-1
+      iright = iface
+      if (iface == 1) then
+        ileft = 1
+      end if
+      if (iface == nx+1) then
+        iright = nx
+      end if
+
+        ! subroutine compute_llflux(uleft,uright, f_left,f_right, fgdnv)
+      call compute_llflux(u_right(1:nvar,ileft,j),u_left(1:nvar,iright,j),&
+                            &flux_right(1:nvar,ileft,j,1),flux_left(1:nvar,iright,j,1),F(1:nvar,iface,j))
     end do
-    write(*,*) 'uleft pressure'
-    write(*,*) u_left(1,:,:)
+    end do 
 
-    !do j = 1, ny
-      do i = 1 , nx
-        if (i == 1) then
-          u_bottom(1:nvar,1:nx,i) = u(1:nvar,1:nx,i)
-          u_top(1:nvar,1:nx,i) = u(1:nvar,1:nx,i+1)
-          cycle
+
+    do i = 1,nx
+      do jface = 1,ny+1
+        ileft = jface-1
+        iright = jface
+        if (jface == 1) then
+          ileft = 1
         end if
-         ! u_right(1:nvar,i,1:ny) = u(1:nvar,i,1:ny)
-        if (i==nx) then
-           u_bottom(1:nvar,1:nx,i) = u(1:nvar,1:ny,i-1)
-           u_top(1:nvar,1:nx,i) = u(1:nvar, 1:ny,i)
-           cycle 
-        end if
-        u_bottom(1:nvar,1:nx,i) = u(1:nvar,1:nx,i-1)
-        u_top(1:nvar,1:nx,i) = u(1:nvar,1:nx,i)
-      end do 
-    !end do
-    write(*,*) 'uleft pressure'
-    write(*,*) u_left(1,:,:)
-
-
-    ! y - direction
-    call get_equilibrium_solution(x,y_faces,w_eq_faces_y,nx,nfaces)
-    call compute_conservative(w_eq_faces_y, u_eq_faces_y, nx, nfaces)
-    !write(*,*) 'u eq faces'
-    !write(*,*) u_eq_faces_y(1,:,:)
-    !u_top(1:nvar,1:nx,1:ny) = u_eq_faces_y(1:nvar,1:nx,2:(ny+1))!delta_w(1:nvar,1:nx,1:ny) + u_eq_faces_y(1:nvar,1:nx, 2:(ny+1))
-    !u_bottom(1:nvar,1:nx,1:ny) = u_eq_faces_y(1:nvar,1:nx,1:ny)!delta_w(1:nvar,1:nx,1:ny) + u_eq_faces_y(1:nvar,1:nx, 1:ny)
-    ! compute fluxes
-    write(*,*) 'ubottom'
-    write(*,*) u_bottom(1,:,:)
-    !call compute_flux_x(u_left, f_left, nx,ny)
-    !call compute_flux_x(u_right, f_right, nx,ny)
-    !call compute_flux_x(u_eq_faces_x,flux_eq_x,nfaces,ny)
-
-    !call compute_flux_y(u_top, g_top, nx,ny)
-    !call compute_flux_y(u_bottom, g_bottom, nx,ny)
-    !call compute_flux_y(u_eq_faces_y,flux_eq_y,nx,nfaces)
-
-    one = 1
-    ! compute numerical flux
-    do jcell = 1,ny
-      do iface = 1,nfaces
-        ileft = iface - 1
-        iright = iface
-        if (bc==2) then ! zero gradient
-          if(iface==1) ileft = 1
-          if(iface==nx+1) iright = nx
+        if (jface == ny+1) then
+          iright = ny
         end if
 
-        !write(*,*) 'u right, u left'
-        !write(*,*) u_right(1:nvar,ileft,jcell),u_left(1:nvar,iright,jcell)
-
-        call compute_llflux(u_right(1:nvar,ileft,jcell),u_left(1:nvar,iright,jcell),&
-                        & f_right(1:nvar,ileft,jcell), f_left(1:nvar,iright,jcell), flux_r)
-
-        !write(*,*) 'f right,f left'
-        !write(*,*) f_right(1:nvar,ileft,jcell), f_left(1:nvar,iright,jcell)
-        !write(*,*) 'riemann flux'
-        !write(*,*) flux_r
-
-        flux_riemann(1:nvar,iface,jcell) = flux_r
+       call compute_llflux(u_top(1:nvar,i,ileft),u_bottom(1:nvar,i,iright),&
+                            &flux_top(1:nvar,i,ileft,2),flux_bottom(1:nvar,i,iright,2),G(1:nvar,i,jface))
       end do
     end do
 
-    do icell = 1,nx
-      do jface = 1,nfaces
-        itop = jface
-        ibottom = jface - 1
-        if (bc==2) then ! zero gradient
-          if(jface==1) ibottom = 1
-          if(jface==ny+1) itop = nx
-        end if
 
-        call compute_llflux(u_top(1:nvar,icell,ibottom),u_bottom(1:nvar,icell,itop),&
-                        & g_top(1:nvar,icell, ibottom), g_bottom(1:nvar,icell, itop), flux_g)
-
-        g_flux(1:nvar,icell,jface) = flux_g
-      end do
-    end do
-    write(*,*) 'flux riemann'
-    write (*,*) flux_riemann(1,:,:)
-    write(*,*) 'flux g riemann'
-    write (*,*) g_flux(1,:,:)
     ! compute source
-    call get_source(u,s,x,y, nx,ny)
-    !call get_source(u_eq,s_eq, x, nx)
+    call get_source(w_eq,s_eq,nx,ny)
+    call compute_primitive(u,w,nx,ny)
+    call get_source(w,s,nx,ny)
 
-    dudt(1:nvar,1:nx, 1:ny) = -(flux_riemann(1:nvar,2:(nx+1),1:ny)-flux_riemann(1:nvar,1:nx,1:ny))*oneoverdx &
-          &-(g_flux(1:nvar,1:nx,2:(ny+1))-g_flux(1:nvar,1:nx,1:ny))*oneoverdy !+ s(1:nvar,1:nx, 1:ny)
-    write(*,*) 'dudt'
-    write(*,*) dudt(1,:,:)
+    !write(*,*) 'sources'
+    !write(*,*) s
+    !write(*,*) s_eq
+
+    call compute_flux(u_x_faces,F_eq,nx+1,ny+1)
+    call compute_flux(u_y_faces,G_eq,nx+1,ny+1)
+
+    do i = 1 ,nx
+      do j = 1 ,ny 
+        dudt(1:nvar,i, j) =  &
+          & - (F(1:nvar,i+1,j) - F(1:nvar,i,j))*oneoverdx &
+          & - (G(1:nvar,i,j+1) - G(1:nvar,i,j))*oneoverdy&
+          & + s(1:nvar,i,j) &
+          & - s_eq(1:nvar,i,j) &
+          & + (F_eq(1:nvar,i+1,j,1) - F_eq(1:nvar,i,j,1))*oneoverdx &
+          & + (G_eq(1:nvar,i,j+1,2) - G_eq(1:nvar,i,j,2))*oneoverdy
+      end do
+    end do
+    write(*,*) dudt
+    dudt(:,1,:) = 0.
+    dudt(:,nx,:) = 0.
+    dudt(:,:,1) = 0.
+    dudt(:,:,ny) = 0.
   !+ s(1:nvar,1:nx) + &
   !        & (flux_eq(1:nvar,2:(nx+1),1:ny)-flux_eq(1:nvar,1:nx,1:ny))*oneoverdx - s_eq(1:nvar,1:nx) &
 
-  end subroutine compute_update_old
+  end subroutine compute_update_exact
+
