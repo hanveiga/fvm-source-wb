@@ -6,15 +6,15 @@ module dg_commons
   integer,parameter::nx=300
   integer,parameter::nquad=n
   integer,parameter::nvar=3
-  integer,parameter::riemann=2
-  logical,parameter::use_limiter=.false.
+  integer,parameter::riemann=1
+  logical,parameter::use_limiter=.true.
 
   ! Problem set-up
-  integer,parameter::ninit=7
-  integer,parameter::bc=2
+  integer,parameter::ninit=8
+  integer,parameter::bc=4
   integer,parameter::source=2
-  real(kind=8)::tend=0.25
-  real(kind=8)::boxlen=1.0
+  real(kind=8)::tend=0.10
+  real(kind=8)::boxlen=10.0
   real(kind=8)::gamma=1.4
   real(kind=8)::pert=0.01
 

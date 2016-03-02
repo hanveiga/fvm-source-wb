@@ -363,6 +363,9 @@ subroutine compute_update(u,dudt)
   dx=boxlen/dble(nx)
   oneoverdx=1.0/dx
 
+  call gl_quadrature(chsi_quad,w_quad,nquad)
+
+
   ! Loop over cells
   do icell=1,nx
 
@@ -462,6 +465,33 @@ subroutine compute_update(u,dudt)
         end select
         flux_face(1:nvar,iface)=flux_riemann
      endif
+     if(bc==4.AND.iface==1)then
+        u_tmp(1:nvar)= exp(0.)+u_right(1:nvar,1)-exp(-((0.5*dx)+dx/2.0*chsi_quad(1)))
+        !u_tmp(2)=-u_tmp(2)
+        select case(riemann)
+        case(1)
+           call riemann_llf(u_tmp,u_left(1:nvar,iright)&
+                & ,flux_riemann,gamma,nvar)
+        case(2)
+           call riemann_hllc(u_tmp,u_left(1:nvar,iright)&
+                & ,flux_riemann,gamma,nvar)
+        end select
+        flux_face(1:nvar,iface)=flux_riemann
+     endif
+     if(bc==4.AND.iface==nx+1)then
+        u_tmp(1:nvar)=exp(-boxlen) + u_left(1:nvar,nx) - exp(-(((nx-0.5)*dx)+dx/2.0*chsi_quad(nquad)))
+        !u_tmp(2)=-u_tmp(2)
+        select case(riemann)
+        case(1)
+           call riemann_llf(u_right(1:nvar,ileft),u_tmp&
+           &,flux_riemann,gamma,nvar)
+        case(2)
+           call riemann_hllc(u_right(1:nvar,ileft),u_tmp&
+                &,flux_riemann,gamma,nvar)
+        end select
+        flux_face(1:nvar,iface)=flux_riemann
+     endif
+
   end do
 
   select case (source)
@@ -513,8 +543,9 @@ subroutine compute_update(u,dudt)
              & ) + source_vol(1:nvar,i,icell)
      end do
   end do
-  dudt(:,:,1)=0
-  dudt(:,:,nx)=0
+
+  dudt(:,:,1) = 0.
+  dudt(:,:,nx) = 0.
 
 end subroutine compute_update
 !==============================================
@@ -590,7 +621,7 @@ subroutine condinit(x,uu)
      case(8) ! hydro + pert
            ww(1) = exp(-x)
            ww(2) = 0.
-           ww(3) = exp(-x) + pert*exp(-100*(x-0.5)**2)
+           ww(3) = exp(-x) + pert*exp(-100*(x-boxlen/2.)**2)
      end select
 
      ! Convert primitive to conservative
