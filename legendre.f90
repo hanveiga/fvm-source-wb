@@ -81,7 +81,7 @@ subroutine gl_quadrature(x_quad,w_quad,n)
   real(kind=8)::dpi=acos(-1.0d0),xx
   real(kind=8)::legendre,legendre_prime
 
-  write(*,*)"Computing Gauss-Legendre quadrature points and weights."
+  !write(*,*)"Computing Gauss-Legendre quadrature points and weights."
   do i=1,n
      xx=(1.0-0.125/n/n+0.125/n/n/n)* & 
           & cos(dpi*(4.0*dble(i)-1.0)/(4.0*dble(n)+2.0))

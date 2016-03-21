@@ -11,12 +11,14 @@ program dg
 
   ! Main variables
   real(kind=8),dimension(1:nvar,1:n,1:nx)::u,dudt,w1,w2,w3,w4, ureal, uinit
+  real(kind=8),dimension(1:nvar,1:n,1:nx)::delta_u, delta_u_nodes
+  real(kind=8),dimension(1:nvar,1:n,1:nx)::u_eq, w_eq, u_init, u_eq_modes, w_eq_modes
 
   integer::iter=0,icell,i,j,ivar, intnode
   real(kind=8)::legendre,legendre_prime
   real(kind=8)::xcell,dx,x_quad
-  real(kind=8)::t,dt,cmax
-  real(kind=8),dimension(1:nvar)::uu,ww
+  real(kind=8)::t,dt,cmax, error
+  real(kind=8),dimension(1:nvar)::uu,ww, ww_e
   character(len=20)::filename
 
   !=====================================================
@@ -39,10 +41,39 @@ program dg
         do j=1,nquad
            ! Quadrature point in physical space
            x_quad=xcell+dx/2.0*chsi_quad(j)
-           call condinit(x_quad,uu)
+           !call condinit(x_quad,ww)
+           call condinit(x_quad, u_init(1:nvar,j,icell))
+           call compute_conservative(ww,uu,1)
            ! Perform integration using GL quadrature
            u(1:nvar,i,icell)=u(1:nvar,i,icell)+0.5* &
-                & uu(1:nvar)* &
+                !& uu(1:nvar)* &
+                & u_init(1:nvar,j,icell)* &
+                & legendre(chsi_quad(j),i-1)* &
+                & w_quad(j)
+        end do
+     end do
+  end do
+
+
+
+  !===========================
+  ! Compute equilibrium solution
+  !===========================
+  u_eq_modes(:,:,:)=0.0
+  do icell=1,nx
+     xcell=(dble(icell)-0.5)*dx
+     ! Loop over modes coefficients
+     do i=1,n
+        w_eq(1:nvar,i,icell)=0.0
+        ! Loop over quadrature points
+        do j=1,nquad
+           ! Quadrature point in physical space
+           x_quad=xcell+dx/2.0*chsi_quad(j)
+           call get_eq_solution([x_quad],w_eq(1:nvar,j,icell),1)
+           call compute_conservative(w_eq(1:nvar,j,icell),u_eq(1:nvar,j,icell),1)
+           ! Perform integration using GL quadrature
+           u_eq_modes(1:nvar,i,icell)=u_eq_modes(1:nvar,i,icell)+0.5* &
+                & u_eq(1:nvar,j,icell)* &
                 & legendre(chsi_quad(j),i-1)* &
                 & w_quad(j)
         end do
@@ -101,22 +132,51 @@ program dg
   do icell=1,nx
      !xcell=(dble(icell)-0.5)*dx
      xcell = (dble(icell)-0.5)*dx + dx/2.0*chsi_quad(1)
+     call get_eq_solution([xcell],ww_e,1)
      call compute_primitive(uinit(1:nvar,1,icell),ww,gamma,nvar)
-     write(10,'(7(1PE12.5,1X))')xcell,(ww(ivar)-exp(-xcell),ivar=3,nvar)
+     write(10,'(7(1PE12.5,1X))')xcell,(ww(ivar),ivar=3,nvar)
   end do
   close(10)
 
   !===============
   ! Main  loop
   !===============
+
+  delta_u(:,:,:) = 0.0
+  do icell=1,nx
+     xcell=(dble(icell)-0.5)*dx
+     ! Loop over modes coefficients
+     do i=1,n
+        u(1:nvar,i,icell)=0.0
+        ! Loop over quadrature points
+        do j=1,nquad
+           ! Quadrature point in physical space
+           x_quad=xcell+dx/2.0*chsi_quad(j)
+           !call condinit(x_quad,ww)
+           call condinit(x_quad, u_init(1:nvar,j,icell))
+           call get_eq_solution([x_quad], w_eq(1:nvar,j,icell),1)
+           call compute_conservative(w_eq(1:nvar,j,icell),u_eq(1:nvar,j,icell),1)
+
+           ! Perform integration using GL quadrature
+           delta_u(1:nvar,i,icell)=delta_u(1:nvar,i,icell)+0.5* &
+                !& uu(1:nvar)* &
+                & (u_init(1:nvar,j,icell)-u_eq(1:nvar,j,icell))* &
+                & legendre(chsi_quad(j),i-1)* &
+                & w_quad(j)
+        end do
+     end do
+  end do
+
+
   t=0
   iter=0
   do while(t < tend)
-
+  !do while(iter<100)
      ! Compute time step
-     call compute_max_speed(u,cmax)
-     dt=0.8*dx/cmax/(2.0*dble(n)+1.0)
-
+     call compute_max_speed(uinit,cmax)
+     write(*,*) 'DT'
+     dt=0.9*dx/cmax/(2.0*dble(n)+1.0)
+     write(*,*) dt
      if(integrator=='RK1')then
         call compute_update(u,dudt)
         u=u+dt*dudt
@@ -144,6 +204,7 @@ program dg
      endif
 
      if(integrator=='RK4')then
+        u = u - u_eq
         call compute_update(u,dudt)
         w1=u+0.391752226571890*dt*dudt
         call limiter(w1)
@@ -160,7 +221,85 @@ program dg
         call compute_update(w4,dudt)
         u=u+0.386708617503269*w4+0.226007483236906*dt*dudt
         call limiter(u)
+        u = u + u_eq
      endif
+
+
+     if(integrator=='RKw')then
+
+        call compute_update_exact(u,u_eq_modes, dudt)
+        w1=u+0.391752226571890*dt*dudt
+        delta_u = w1 - u_eq_modes
+        !call limiter(w1)
+        call limiter_TDV(delta_u)
+        w1 = u_eq_modes + delta_u
+
+        call compute_update_exact(w1, u_eq_modes, dudt)
+        w2=0.444370493651235*u+0.555629506348765*w1+0.368410593050371*dt*dudt
+        
+        delta_u = w2 - u_eq_modes
+        call limiter_TDV(delta_u)
+        w2 = u_eq_modes + delta_u
+
+        !call limiter(w2)
+        
+        call compute_update_exact(w2,u_eq_modes, dudt)
+        w3=0.620101851488403*u+0.379898148511597*w2+0.251891774271694*dt*dudt
+        
+        delta_u = w3 - u_eq_modes
+        !call limiter(w3)
+        call limiter_TDV(delta_u)
+        w3 = u_eq_modes + delta_u
+
+        call compute_update_exact(w3,u_eq_modes, dudt)
+        w4=0.178079954393132*u+0.821920045606868*w3+0.544974750228521*dt*dudt
+
+        u=0.517231671970585*w2+0.096059710526147*w3+0.063692468666290*dt*dudt
+        
+        delta_u = w4 - u_eq_modes
+        !call limiter(w4)
+        call limiter_TDV(delta_u)
+        w4 = delta_u + u_eq_modes
+
+        call compute_update_exact(w4,u_eq_modes, dudt)
+        u=u+0.386708617503269*w4+0.226007483236906*dt*dudt
+        delta_u = u - u_eq_modes
+        call limiter_TDV(delta_u)
+        u = delta_u + u_eq_modes
+     endif
+     !u = u+u_eq
+
+     if(integrator=='RKe')then
+        call compute_update_exact_delta(delta_u,u_eq, dudt)
+        w1=delta_u+dt*dudt
+        call limiter_cons(w1)
+        call compute_update_exact_delta(w1,u_eq, dudt)
+        delta_u=0.5*delta_u+0.5*w1+0.5*dt*dudt
+        call limiter_cons(delta_u)
+     endif
+
+     !u = u + u_eq
+      
+      ! reconstruct u from modes
+
+      delta_u_nodes(:,:,:) = 0.0
+      do ivar = 1,nvar
+        do icell=1,nx
+           xcell=(dble(icell)-0.5)*dx
+           do i=1,n
+             x_quad=xcell+dx/2.0*chsi_quad(i)
+             !call condinit(x_quad,uu)
+             !uinit(ivar,i,icell) = uu(ivar)
+             do intnode = 1,n
+            ! Loop over quadrature points
+              delta_u_nodes(ivar,i,icell) = delta_u_nodes(ivar, i, icell) +&
+              & delta_u(ivar, intnode ,icell)*legendre(x_quad,intnode-1)
+             end do
+            end do
+          end do
+      end do
+
+      uinit = u_eq + delta_u_nodes
 
      t=t+dt
      iter=iter+1
@@ -168,7 +307,7 @@ program dg
 
   enddo
 
-
+  
   ureal(:,:,:)=0
   uinit(:,:,:)=0
   ! reconstruct u from modes
@@ -177,16 +316,21 @@ program dg
        xcell=(dble(icell)-0.5)*dx
        do i=1,n
          x_quad=xcell+dx/2.0*chsi_quad(i)
-         call condinit(x_quad,uu)
-         uinit(ivar,i,icell) = uu(ivar)
+         !call condinit(x_quad,uu)
+         !uinit(ivar,i,icell) = uu(ivar)
          do intnode = 1,n
         ! Loop over quadrature points
-          ureal(ivar,i,icell) = ureal(ivar, i, icell) +&
-          & u(ivar, intnode ,icell)*legendre(x_quad,intnode-1)
+          delta_u_nodes(ivar,i,icell) = delta_u_nodes(ivar, i, icell) +&
+          & delta_u(ivar, intnode ,icell)*legendre(x_quad,intnode-1)
          end do
         end do
       end do
-    end do
+  end do
+
+  ureal = u_eq + delta_u_nodes
+
+  write(*,*) 'END OF SIM'
+  write(*,*) ureal - u_eq
 
 
 !==========================
@@ -195,9 +339,10 @@ program dg
   write(filename,"(A5,I5.5)")"recon",99999
   open(10,file=TRIM(filename)//".dat",form='formatted')
   do icell=1,nx
-     xcell=(dble(icell)-0.5)*dx
+     xcell = (dble(icell)-0.5)*dx + dx/2.0*chsi_quad(1)
+     call get_eq_solution([xcell],ww_e,1)
      call compute_primitive(ureal(1:nvar,1,icell),ww,gamma,nvar)
-     write(10,'(7(1PE12.5,1X))')xcell,(ww(ivar),ivar=1,nvar)
+     write(10,'(7(1PE12.5,1X))')xcell,(ww(ivar),ivar=3,nvar)
   end do
   close(7)
 
@@ -219,19 +364,39 @@ program dg
   do icell=1,nx
      !xcell=(dble(icell)-0.5)*dx
      xcell = (dble(icell)-0.5)*dx + dx/2.0*chsi_quad(1)
+     call get_eq_solution([xcell],ww_e,1)
      call compute_primitive(ureal(1:nvar,1,icell),ww,gamma,nvar)
-     write(10,'(7(1PE12.5,1X))')xcell,(ww(ivar)-exp(-xcell),ivar=3,nvar)
+     write(10,'(7(1PE12.5,1X))')xcell,(ww(ivar),ivar=3,nvar)
+     if (error < abs(ww(3)-ww_e(3))) then
+        error = abs(ww(3)-ww_e(3))
+     end if
   end do
   close(10)
 
-  write(*,*)'========================================'
-  write(*,*)'time=',t,dt
+  error = 0.0
+  write(filename,"(A5,I5.5)")"diffe",99999
+  open(10,file=TRIM(filename)//".dat",form='formatted')
   do icell=1,nx
-     xcell=(dble(icell)-0.5)*dx
-     call compute_primitive(u(1:nvar,1,icell),ww,gamma,nvar)
-     write(*,'(7(1PE12.5,1X))')xcell,(ww(ivar),ivar=1,nvar)
+     !xcell=(dble(icell)-0.5)*dx
+     xcell =  (dble(icell)-0.5)*dx + dx/2.0*chsi_quad(1)
+     call get_eq_solution([xcell],ww_e,1)
+     call compute_primitive(ureal(1:nvar,1,icell),ww,gamma,nvar)
+     write(10,'(7(1PE12.5,1X))')xcell,(ww(ivar)-ww_e(ivar),ivar=3,nvar)
+     if (error < abs(ww(3)-ww_e(3))) then
+        error = abs(ww(3)-ww_e(3))
+     end if
   end do
+  close(10)
 
+
+!  write(*,*)'========================================'
+!  write(*,*)'time=',t,dt
+!  do icell=1,nx
+!     xcell=(dble(icell)-0.5)*dx
+!     call compute_primitive(u(1:nvar,1,icell),ww,gamma,nvar)
+!     write(*,'(7(1PE12.5,1X))')xcell,(ww(ivar),ivar=1,nvar)
+!  end do
+  write(*,*) error
 end program dg
 !==============================================
 subroutine limiter(u)
@@ -340,6 +505,292 @@ subroutine limiter(u)
   u = u_lim
 
 end subroutine limiter
+
+!==============================================
+
+subroutine limiter_TDV(u)
+  use dg_commons
+  implicit none
+  real(kind=8),dimension(1:nvar,1:n,1:nx)::u
+  !================================================================
+  ! This routine applies the moment limiter to the current solution
+  ! as in Krivodonova, 2007, JCP, 226, 879
+  ! using characteristic variables.
+  !================================================================
+  real(kind=8),dimension(1:nvar,1:n,1:nx)::u_lim
+  real(kind=8),dimension(1:nvar,1:n)::w_lim
+  real(kind=8),dimension(1:nvar,1:n)::wL,wM,wR
+  real(kind=8),dimension(1:nvar)::w
+  real(kind=8),dimension(1:nvar)::uL,uM,uR
+  real(kind=8),dimension(1:nvar)::u_left,u_right,w_left,w_right
+  real(kind=8),dimension(1:nvar)::average_u_m,average_u_p,average_u_c
+  
+  real(kind=8)::minmod,maxmod
+  real(kind=8)::switch_left,switch_right
+  real(kind=8)::u_min,u_max,w_min
+  real(kind=8)::coeff_i,coeff_ip1,coeff,D2u
+  integer::icell,i,j,iface,ileft,iright,ivar
+  if(n==1)return
+  ! Compute classical minmod limiter
+  u_lim=u
+  if(use_limiter)then
+  do icell=2,nx-1
+     ileft=icell-1
+     iright=icell+1
+     switch_left=1.0
+     switch_right=1.0
+     ! Compute primitive variable for all modes
+     !call compute_primitive(u(1:nvar,1,icell),w,gamma,nvar)
+     ! Loop only over high-order modes
+     average_u_m = u(1:nvar,1,i-1)
+     average_u_p = u(1:nvar,1,i+1)
+     average_u_c = u(1:nvar,1,i)
+     do i=n-1,1,-1
+        ! Renormalise to get proper Legendre polynomials
+        ! and corresponding derivatives
+        coeff_i=sqrt(2.0*dble(i-1)+1.0)*(2.0*dble(i)-1)
+        coeff_ip1=sqrt(2.0*dble(i)+1.0)*(2.0*dble(i)-1)
+        uL(1:nvar)=(average_u_c-average_u_m)
+        uR(1:nvar)=(average_u_p-average_u_c)
+        uM(1:nvar)=u(1:nvar,i,icell)
+     end do
+     ! Loop over variables
+     do ivar=1,nvar
+        ! Loop only over high-order modes
+        do i=n-1,1,-1
+           if (abs(u(ivar,i,icell)) < 50*(1.0/nx)**2) then
+              u_lim(ivar,i,icell) = u(ivar,i,icell)
+           else
+              w_min = minmod(u(ivar,i,icell),uL(ivar),uR(ivar))
+              u_lim(ivar,i,icell) = w_min
+           end if
+        end do
+        ! End loop over modes
+     end do
+     ! End loop over variables
+  end do
+  ! End loop over cells
+  endif
+
+  ! Check for unphysical values in the limited states
+  do icell=1,nx
+     ! Compute primitive variable
+     call compute_primitive(u_lim(1:nvar,1,icell),w,gamma,nvar)
+     u_left(1:nvar)=0.0; u_right(1:nvar)=0.0
+     ! Loop over modes
+     do i=1,n
+        u_left(1:nvar)=u_left(1:nvar)+u_lim(1:nvar,i,icell)*(-1.0)**(i-1)*sqrt(2.0*dble(i)-1.0)
+        u_right(1:nvar)=u_right(1:nvar)+u_lim(1:nvar,i,icell)*sqrt(2.0*dble(i)-1.0)
+     end do
+     if(u_left(1)<1d-10.OR.u_right(1)<1d-10.OR.u_left(3)<1d-10.OR.u_left(3)<1d-10)then
+        u_lim(1:nvar,2:n,icell)=0.0
+     endif
+     !call compute_conservative(u_lim, u_lim_cons, nvar, gamma)
+  end do
+
+  ! Update variables with limited states
+  u = u_lim
+
+end subroutine limiter_TDV
+
+
+!==============================================
+subroutine limiter_cons(u)
+  use dg_commons
+  implicit none
+  real(kind=8),dimension(1:nvar,1:n,1:nx)::u
+  !================================================================
+  ! This routine applies the moment limiter to the current solution
+  ! as in Krivodonova, 2007, JCP, 226, 879
+  ! using characteristic variables.
+  !================================================================
+  real(kind=8),dimension(1:nvar,1:n,1:nx)::u_lim
+  real(kind=8),dimension(1:nvar,1:n)::w_lim
+  real(kind=8),dimension(1:nvar,1:n)::wL,wM,wR
+  real(kind=8),dimension(1:nvar)::w
+  real(kind=8),dimension(1:nvar)::uL,uM,uR
+  real(kind=8),dimension(1:nvar)::u_left,u_right,w_left,w_right
+  real(kind=8)::minmod,maxmod
+  real(kind=8)::switch_left,switch_right
+  real(kind=8)::u_min,u_max,w_min
+  real(kind=8)::coeff_i,coeff_ip1,coeff,D2u
+  integer::icell,i,j,iface,ileft,iright,ivar
+  if(n==1)return
+  ! Compute classical minmod limiter
+  u_lim=u
+  if(use_limiter)then
+  do icell=1,nx
+     ileft=icell-1
+     iright=icell+1
+     switch_left=1.0
+     switch_right=1.0
+     if(bc==1)then
+        if(icell==1)ileft=nx
+        if(icell==nx)iright=1
+     endif
+     if(bc==2)then
+        if(icell==1)ileft=1
+        if(icell==nx)iright=nx
+     endif
+     if(bc==3)then
+        if(icell==1)then
+           ileft=1
+           switch_left=-1.0
+        endif
+        if(icell==nx)then
+           iright=nx
+           switch_right=-1.0
+        endif
+     endif
+     if(bc==4)then
+        if(icell==1)then
+           ileft=1
+           !switch_left=-1.0
+        endif
+        if(icell==nx)then
+           iright=nx
+           !switch_right=-1.0
+        endif
+     endif
+     ! Compute primitive variable for all modes
+     call compute_primitive(u(1:nvar,1,icell),w,gamma,nvar)
+     !if ((abs(w(1))< 1e6).and.(abs(w(2))<1e6).and.(abs(w(3))<1e6))then
+     !   write(*,*) ' wop'
+     !   exit
+     !end if 
+     ! Loop only over high-order modes
+     do i=n-1,1,-1
+        ! Renormalise to get proper Legendre polynomials
+        ! and corresponding derivatives
+        coeff_i=sqrt(2.0*dble(i-1)+1.0)*(2.0*dble(i)-1)
+        coeff_ip1=sqrt(2.0*dble(i)+1.0)*(2.0*dble(i)-1)
+        uL(1:nvar)=(u(1:nvar,i,icell)-u(1:nvar,i,ileft))*coeff_i/coeff_ip1
+        uR(1:nvar)=(u(1:nvar,i,iright)-u(1:nvar,i,icell))*coeff_i/coeff_ip1
+        uM(1:nvar)=u(1:nvar,i+1,icell)
+        uL(2)=switch_left*uL(2)
+        uR(2)=switch_right*uR(2)
+        !call cons_to_char(uL,wL(1:nvar,i+1),w,nvar,gamma)
+        !call cons_to_char(uR,wR(1:nvar,i+1),w,nvar,gamma)
+        !call cons_to_char(uM,wM(1:nvar,i+1),w,nvar,gamma)
+        wL(1:nvar,i+1) = uL
+        wR(1:nvar,i+1) = uR
+        wM(1:nvar,i+1) = uM
+     end do
+     w_lim=wM
+     ! Loop over variables
+     do ivar=1,nvar
+        ! Loop only over high-order modes
+        do i=n-1,1,-1
+           w_min=minmod(wL(ivar,i+1),wM(ivar,i+1),wR(ivar,i+1))
+           w_lim(ivar,i+1)=w_min
+           if(ABS(w_min-wM(ivar,i+1)).LT.0.01*ABS(wM(ivar,i+1)))exit
+        end do
+        ! End loop over modes
+     end do
+     ! End loop over variables
+     ! Compute conservative variables
+     ! Loop only over high-order modes
+     !do i=n-1,1,-1
+     !   call char_to_cons(w_lim(1:nvar,i+1),u_lim(1:nvar,i+1,icell),w,nvar,gamma)
+     !end do
+     do i=n-1,1,-1
+       u_lim(1:nvar,i+1,icell) = w_lim(1:nvar,i+1)
+      end do 
+  end do
+  ! End loop over cells
+  endif
+  ! Check for unphysical values in the limited states
+  do icell=1,nx
+     ! Compute primitive variable
+     call compute_primitive(u_lim(1:nvar,1,icell),w,gamma,nvar)
+     u_left(1:nvar)=0.0; u_right(1:nvar)=0.0
+     ! Loop over modes
+     do i=1,n
+        u_left(1:nvar)=u_left(1:nvar)+u_lim(1:nvar,i,icell)*(-1.0)**(i-1)*sqrt(2.0*dble(i)-1.0)
+        u_right(1:nvar)=u_right(1:nvar)+u_lim(1:nvar,i,icell)*sqrt(2.0*dble(i)-1.0)
+     end do
+     call cons_to_prim(u_left,w_left,w,nvar,gamma)
+     call cons_to_prim(u_right,w_right,w,nvar,gamma)
+     if(w_left(1)<1d-10.OR.w_right(1)<1d-10.OR.w_left(3)<1d-10.OR.w_left(3)<1d-10)then
+        u_lim(1:nvar,2:n,icell)=0.0
+     endif
+  end do
+
+  ! Update variables with limited states
+  u = u_lim
+
+end subroutine limiter_cons
+!====
+subroutine modes_to_nodes(modes,nodes, cell_center, chsi1_quad)
+  use dg_commons
+  implicit none
+
+  real(kind=8),dimension(1:nvar,1:n)::modes, nodes
+  real(kind=8),dimension(1:n)::chsi1_quad
+  integer::cell_center
+  integer::icell, i, intnode, ivar
+  real(kind=8)::dx, xcell, legendre, xquad 
+
+  dx = 1./nx
+
+  do ivar = 1,nvar
+      xcell=(dble(cell_center)-0.5)*dx
+      do i=1,n
+         xquad=xcell+dx/2.0*chsi1_quad(i)
+         nodes(ivar, i) = 0.
+         do intnode = 1,n
+          nodes(ivar,i) = nodes(ivar, i) +&
+          & modes(ivar, intnode)*legendre(xquad,intnode-1)
+         end do
+      end do
+  end do
+
+end subroutine modes_to_nodes
+
+
+
+subroutine nodes_to_modes(nodes, modes, cell_center, chsi1_quad, w1_quad)
+  use dg_commons
+  implicit none
+
+  real(kind=8),dimension(1:nvar,1:n)::modes, nodes
+  real(kind=8),dimension(1:n)::chsi1_quad, w1_quad
+  integer::cell_center
+  integer::icell, i, intnode, ivar, j
+  real(kind=8)::dx, xcell, legendre, xquad 
+
+  dx = 1./nx
+
+     ! Loop over modes coefficients
+
+     xcell=(dble(cell_center)-0.5)*dx
+     do i=1,n
+        modes(1:nvar,i)=0.0
+        ! Loop over quadrature points
+        do j=1,n
+           ! Quadrature point in physical space
+           xquad=xcell+dx/2.0*chsi1_quad(j)
+           modes(1:nvar,i)=modes(1:nvar,i)+0.5* &
+                & nodes(1:nvar,j)* &
+                !& legendre(chsi1_quad(j),i-1)* &
+                & legendre(chsi1_quad(j),i-1)* &
+                & w1_quad(j)
+        end do
+     end do
+
+
+end subroutine nodes_to_modes
+
+!============
+
+!=============
+! get conservative - primitive
+
+! get primitive - conservative
+
+
+! lol this shit's all wrong...
+
 !==============================================
 subroutine compute_update(u,dudt)
   use dg_commons
@@ -359,6 +810,14 @@ subroutine compute_update(u,dudt)
   real(kind=8)::chsi_left=-1,chsi_right=+1
   real(kind=8)::dx,x_quad
   real(kind=8)::cmax,oneoverdx,c_left,c_right
+
+
+
+  real(kind=8),dimension(1:nvar,1:n):: u_left_bc, u_left_bc_nodes, w_0_eq, w_1_eq
+  real(kind=8),dimension(1:nvar,1:n):: u_0_eq, u_1_eq, u_left_bc_nodes_1, u_left_modes_1
+  real(kind=8),dimension(1:n)::x_0_nodes, x_1_nodes
+  real(kind=8),dimension(1:nvar)::u_left_0
+
 
   dx=boxlen/dble(nx)
   oneoverdx=1.0/dx
@@ -409,7 +868,15 @@ subroutine compute_update(u,dudt)
         u_right(1:nvar,icell)=u_right(1:nvar,icell)+u(1:nvar,i,icell)*legendre(chsi_right,i-1)
      end do
   end do
+
+  ! ------------------
+  ! disgusting boundary computation :3 
+  ! ------------
+  !u_left_0 = u_left_bc_nodes_1(1:nvar,1)
   ! End loop over cells
+  !write(*,*) 'U left:'
+  !write (*,*) u_left_bc_nodes_1
+  !write(*,*) u_left(1:nvar,1)
 
   !==========================================
   ! Compute physical flux from Riemann solver
@@ -466,8 +933,8 @@ subroutine compute_update(u,dudt)
         flux_face(1:nvar,iface)=flux_riemann
      endif
      if(bc==4.AND.iface==1)then
-        u_tmp(1:nvar)= exp(0.)+u_right(1:nvar,1)-exp(-((0.5*dx)+dx/2.0*chsi_quad(1)))
-        !u_tmp(2)=-u_tmp(2)
+        u_tmp(1:nvar)= u_right(1:nvar,1) !exp(-((-0.5*dx)+dx/2.0*chsi_quad(nquad)))+u_right(1:nvar,1)-exp(-((0.5*dx)+dx/2.0*chsi_quad(1)))
+        u_tmp(2)=-u_tmp(2)
         select case(riemann)
         case(1)
            call riemann_llf(u_tmp,u_left(1:nvar,iright)&
@@ -479,8 +946,8 @@ subroutine compute_update(u,dudt)
         flux_face(1:nvar,iface)=flux_riemann
      endif
      if(bc==4.AND.iface==nx+1)then
-        u_tmp(1:nvar)=exp(-boxlen) + u_left(1:nvar,nx) - exp(-(((nx-0.5)*dx)+dx/2.0*chsi_quad(nquad)))
-        !u_tmp(2)=-u_tmp(2)
+        u_tmp(1:nvar)= u_left(1:nvar,nx)!exp(-(((nx+0.5)*dx)+dx/2.0*chsi_quad(1))) + u_left(1:nvar,nx) - exp(-(((nx-0.5)*dx)+dx/2.0*chsi_quad(nquad)))
+        u_tmp(2)=-u_tmp(2)
         select case(riemann)
         case(1)
            call riemann_llf(u_right(1:nvar,ileft),u_tmp&
@@ -529,7 +996,6 @@ subroutine compute_update(u,dudt)
           end do
         end do
   end select
-
   !========================
   ! Compute final DG update
   !========================
@@ -543,12 +1009,34 @@ subroutine compute_update(u,dudt)
              & ) + source_vol(1:nvar,i,icell)
      end do
   end do
+  !dudt(:,:,:) = 0.
 
-  dudt(:,:,1) = 0.
-  dudt(:,:,nx) = 0.
 
 end subroutine compute_update
 !==============================================
+
+subroutine get_eq_solution(x, w, size)
+  ! get equilibrium solution for primitive variables
+  ! use parameters
+  ! communicate which initial solution, equilibrium type
+  ! boundary conditions and domain properties
+  use dg_commons
+  implicit none
+  integer::size
+  real(kind=8),dimension(1:nvar,1:size)::w
+  real(kind=8),dimension(1:size)::x
+  !class(:)::x
+  ! internal variables
+
+  w(1,:) = exp(-x)
+  w(2,:) = 0
+  w(3,:) = exp(-x)
+
+end subroutine get_eq_solution
+
+
+!-----------
+
 subroutine condinit(x,uu)
   use dg_commons
   real(kind=8)::x
@@ -704,8 +1192,8 @@ subroutine compute_source(u,source,x_quad,gamma,nvar)
   call compute_primitive(u,w,gamma,nvar)
   ! Compute source (linear)
   source(1)=0
-  source(2)=-w(1)*0.5 !-rho*phi_x
-  source(3)=-w(1)*w(2)*0.5 ! -rho*u*phi_x
+  source(2)=-w(1) !-rho*phi_x
+  source(3)=-w(1)*w(2) ! -rho*u*phi_x
   ! hacky part: phi = gx, g = 1
 end subroutine compute_source
 !==============================================
@@ -731,6 +1219,21 @@ subroutine cons_to_prim(du,dw,w,nvar,gamma)
   dw(3)=(gamma-1.0)*(0.5*w(2)**2*du(1)-w(2)*du(2)+du(3))
 end subroutine cons_to_prim
 !==============================================
+
+subroutine compute_conservative(ww,u,size)
+  use dg_commons
+  implicit none
+  integer::size
+  real(kind=8),dimension(1:nvar,1:size)::u
+  real(kind=8),dimension(1:nvar,1:size)::ww
+  ! Compute primitive variables
+  u(1,:)=ww(1,:)
+  u(2,:)=ww(1,:)*ww(2,:)
+  u(3,:)=ww(3,:)/(gamma-1.0)+0.5*ww(1,:)*ww(2,:)**2
+end subroutine compute_conservative
+
+!---------------
+
 subroutine prim_to_cons(dw,du,w,nvar,gamma)
   implicit none
   integer::nvar
@@ -856,4 +1359,661 @@ subroutine riemann_hllc(ul,ur,fgdnv,gamma,nvar)
   fgdnv(2)=wgdnv(1)*wgdnv(2)*wgdnv(2)+wgdnv(3)
   fgdnv(3)=wgdnv(2)*(ugdnv(3)+wgdnv(3))
 end subroutine riemann_hllc
+!==============================================
+
+
+
+!==============================================
+subroutine compute_update_exact(u,u_eq,dudt)
+  use dg_commons
+  implicit none
+  real(kind=8),dimension(1:nvar,1:n,1:nx)::u,dudt
+  real(kind=8),dimension(1:nvar,1:n,1:nx)::u_eq,delta_u
+  !===========================================================
+  ! This routine computes the DG update for the input state u.
+  !===========================================================
+  real(kind=8),dimension(1:nvar,1:nquad)::u_quad,flux_quad, source_quad
+  real(kind=8),dimension(1:nvar,1:nquad)::u_quad_eq,flux_quad_eq, source_quad_eq
+  real(kind=8),dimension(1:nvar,1:n,1:nx)::flux_vol, source_vol
+  real(kind=8),dimension(1:nvar,1:n,1:nx)::flux_vol_eq, source_vol_eq
+  real(kind=8),dimension(1:nvar,1:nx)::u_left,u_right, u_delta
+  real(kind=8),dimension(1:nvar)::flux_riemann,u_tmp
+  real(kind=8),dimension(1:nvar,1:nx+1)::flux_face,flux_face_eq
+  real(kind=8),dimension(1:nx+1)::x_faces
+
+
+  integer::icell,i,j,iface,ileft,iright,ivar
+  real(kind=8)::legendre,legendre_prime
+  real(kind=8)::chsi_left=-1,chsi_right=+1
+  real(kind=8)::dx,x_quad
+  real(kind=8)::cmax,oneoverdx,c_left,c_right
+  real(kind=8)::x_right,x_left
+  real(kind=8),dimension(1:nvar)::uu_r,uu_l, u_delta_r, u_delta_l, ww_r, ww_l
+  real(kind=8),dimension(1:nvar,1:nx)::u_delta_left,u_delta_right
+  real(kind=8),dimension(1:nvar,1:(nx+1))::u_face_eq, w_face_eq
+
+  real(kind=8),dimension(1:nvar,1:n):: u_left_bc, u_left_bc_nodes, w_0_eq, w_1_eq
+  real(kind=8),dimension(1:nvar,1:n):: u_0_eq, u_1_eq, u_left_bc_nodes_1, u_left_modes_1
+  real(kind=8),dimension(1:n)::x_0_nodes, x_1_nodes
+  real(kind=8),dimension(1:nvar)::u_left_0, uu
+  real(kind=8),dimension(1:nvar)::w_eq_temp,w_eq_temp_0,u_eq_temp,u_eq_temp_0
+
+
+  dx=boxlen/dble(nx)
+  oneoverdx=1./dx
+
+  call gl_quadrature(chsi_quad,w_quad,nquad)
+
+
+
+  do i=1,nx+1
+    x_faces(i) = (i-1)*dx
+    call get_eq_solution(x_faces(i),w_face_eq(1:nvar,i),1)
+    call compute_conservative(w_face_eq(1:nvar,i),u_face_eq(1:nvar,i),1)
+    call compute_flux(u_face_eq(1:nvar,i),flux_face_eq(1:nvar,i),gamma,nvar)
+  end do
+
+  ! Loop over cells
+  do icell=1,nx
+
+     !==================================
+     ! Compute flux at quadrature points
+     !==================================
+     ! Loop over quadrature points
+     do j=1,nquad
+        u_quad(1:nvar,j)=0.0
+        u_quad_eq(1:nvar,j)=0.0
+        ! Loop over modes
+        do i=1,n
+           u_quad(1:nvar,j)=u_quad(1:nvar,j)+u(1:nvar,i,icell)*legendre(chsi_quad(j),i-1)
+           u_quad_eq(1:nvar,j)=u_quad_eq(1:nvar,j)+u_eq(1:nvar,i,icell)*legendre(chsi_quad(j),i-1)
+        end do
+        ! Compute flux at quadrature points
+        call compute_flux(u_quad(1:nvar,j),flux_quad(1:nvar,j),gamma,nvar)
+        call compute_flux(u_quad_eq(1:nvar,j),flux_quad_eq(1:nvar,j),gamma,nvar)
+
+     end do
+     !================================
+     ! Compute volume integral DG term
+     !================================
+     ! Loop over modes
+     do i=1,n
+        flux_vol(1:nvar,i,icell)=0.0
+        flux_vol_eq(1:nvar,i,icell)=0.0
+        ! Loop over quadrature points
+        do j=1,nquad
+           flux_vol(1:nvar,i,icell)=flux_vol(1:nvar,i,icell)+ &
+                & flux_quad(1:nvar,j)* &
+                & legendre_prime(chsi_quad(j),i-1)* &
+                & w_quad(j)
+
+           flux_vol_eq(1:nvar,i,icell)=flux_vol_eq(1:nvar,i,icell)+ &
+                & flux_quad_eq(1:nvar,j)* &
+                & legendre_prime(chsi_quad(j),i-1)* &
+                & w_quad(j)
+        end do
+     end do
+  end do
+
+  !do icell=1,nx
+
+     !==============================
+     ! Compute left and right states
+     ! computing the value AT the node -1 and 1
+     !==============================
+  !   u_left(1:nvar,icell)=0.0
+  !   u_right(1:nvar,icell)=0.0
+     ! Loop over modes
+  !   do i=1,n
+  !      u_left(1:nvar,icell)=u_left(1:nvar,icell)+u(1:nvar,i,icell)*legendre(chsi_left,i-1)
+  !      u_right(1:nvar,icell)=u_right(1:nvar,icell)+u(1:nvar,i,icell)*legendre(chsi_right,i-1)
+  !   end do
+  !end do
+
+  do icell=1,nx
+     !==============================
+     ! Compute left and right states
+     ! computing the value AT the node -1 and 1
+     !==============================
+     !u_delta(1:nvar,icell)=0.0
+     ! Loop over modes
+     u_delta_l = 0.
+     u_delta_r = 0.
+     do i=1,n
+        u_delta_l = u_delta_l+u(1:nvar,i,icell)*legendre(chsi_left,i-1)
+        u_delta_r = u_delta_r+u(1:nvar,i,icell)*legendre(chsi_right,i-1)
+     end do
+     x_left = (icell - 1)*dx!(dble(icell)-0.5)*dx + dx/2.0*(-1) !(dble(icell)-0.5)*dx + dx/2.0*chsi_quad(1)
+     x_right = icell*dx !(dble(icell)-0.5)*dx + dx/2.0*(1) !(dble(icell)-0.5)*dx + dx/2.0*chsi_quad(n)
+     call get_eq_solution([x_right],ww_r,1)
+     call compute_conservative(ww_r,uu_r,1)
+     call get_eq_solution([x_left],ww_l,1)
+     call compute_conservative(ww_l,uu_l,1)
+     !write(*,*) 'udelta_l, u_eq_l'
+     !write(*,*) u_delta_l - uu_l
+     !write(*,*) u_delta_r - uu_r
+     u_delta_left(1:nvar,icell) = u_delta_l - uu_l !(u_delta_r+u_delta_l)/2. - (uu_r+uu_l)/2.
+     u_delta_right(1:nvar,icell) = u_delta_r - uu_r !(u_delta_r+u_delta_l)/2. - (uu_r+uu_l)/2.
+  end do
+
+  do icell=1,nx
+
+     !==============================
+     ! Compute left and right states
+     ! computing the value AT the closest node and transporting to the face
+     !==============================
+     !u_left(1:nvar,icell)=0.0
+     !u_right(1:nvar,icell)=0.0
+     ! Loop over modes
+     !do i=1,n
+        u_left(1:nvar,icell)= u_face_eq(1:nvar,icell) + u_delta_left(1:nvar,icell)
+        u_right(1:nvar,icell)= u_face_eq(1:nvar,icell+1) + u_delta_right(1:nvar,icell)
+     !end do
+  end do
+
+
+ ! write(*,*) 'FACE'
+  !write(*,*) u_left - u_face_eq(:,1:nx)
+  !write(*,*) u_right - u_face_eq(:,2:nx+1)
+
+
+  !==========================================
+  ! Compute physical flux from Riemann solver
+  !==========================================
+  ! Loop over faces
+  do iface=1,nx+1
+     ileft=iface-1
+     iright=iface
+     ! Compute physical flux using Riemann solver
+     select case(riemann)
+     case(1)
+        call riemann_llf(u_right(1:nvar,ileft),u_left(1:nvar,iright)&
+             & ,flux_riemann,gamma,nvar)
+     case(2)
+        call riemann_hllc(u_right(1:nvar,ileft),u_left(1:nvar,iright)&
+             & ,flux_riemann,gamma,nvar)
+     end select
+     flux_face(1:nvar,iface)=flux_riemann
+     ! Compute boundary flux for reflexive BC
+     if(bc==4.AND.iface==1)then
+        call get_eq_solution([(-0.5*dx + dx/2.0*(1))],w_eq_temp,1)
+        call compute_conservative(w_eq_temp,u_eq_temp,1)
+        call get_eq_solution([(0.5*dx + dx/2.0*(-1))],w_eq_temp_0,1)
+        call compute_conservative(w_eq_temp_0,u_eq_temp_0,1)
+        write(*,*) 'u_left - u_eq'
+        write(*,*) u_left(1:nvar,1) - u_eq_temp_0
+        u_tmp(1:nvar)=  u_eq_temp(1:nvar) + u_left(1:nvar,1) - u_eq_temp_0(1:nvar) !exp(-((-0.5*dx)+dx/2.0*chsi_quad(nquad)))+u_right(1:nvar,1)-exp(-((0.5*dx)+dx/2.0*chsi_quad(1)))
+        !u_tmp(2)=-u_tmp(2)
+        select case(riemann)
+        case(1)
+           call riemann_llf(u_tmp,u_left(1:nvar,iright)&
+                & ,flux_riemann,gamma,nvar)
+        case(2)
+           call riemann_hllc(u_tmp,u_left(1:nvar,iright)&
+                & ,flux_riemann,gamma,nvar)
+        end select
+        flux_face(1:nvar,iface)=flux_riemann
+        call compute_flux(u_tmp(1:nvar)  , flux_face(1:nvar,iface),gamma,nvar) !flux_riemann
+     endif
+     if(bc==4.AND.iface==nx+1)then
+        !u_tmp(1:nvar)= u_right(1:nvar,ileft)! exp(-(((nx+0.5)*dx)+dx/2.0*chsi_quad(1))) + u_left(1:nvar,nx) - exp(-(((nx-0.5)*dx)+dx/2.0*chsi_quad(nquad)))
+        !u_tmp(1:nvar)= u_right(1:nvar,nx) 
+        !u_tmp(2)=-u_tmp(2)
+        call get_eq_solution([(nx+0.5)*dx + dx/2.0*(-1)],w_eq_temp,1)
+        call compute_conservative(w_eq_temp,u_eq_temp,1)
+        call get_eq_solution([(nx)*dx],w_eq_temp_0,1)
+        call compute_conservative(w_eq_temp_0,u_eq_temp_0,1)
+        !write(*,*) 'u_right - u_eq'
+        !write(*,*) u_right(1:nvar,nx) - u_eq_temp_0
+        u_tmp(1:nvar)= u_eq_temp(1:nvar) + u_right(1:nvar,nx) - u_eq_temp_0(1:nvar)
+
+        select case(riemann)
+        case(1)
+           call riemann_llf(u_right(1:nvar,ileft),u_tmp&
+           &,flux_riemann,gamma,nvar)
+        case(2)
+           call riemann_hllc(u_right(1:nvar,ileft),u_tmp&
+                &,flux_riemann,gamma,nvar)
+        end select
+        flux_face(1:nvar,iface)=flux_riemann
+        call compute_flux(u_tmp(1:nvar), flux_face(1:nvar,iface),gamma,nvar) !flux_riemann
+
+     endif
+
+
+
+      if(bc==5.AND.iface==1)then ! mimic FVM
+        call get_eq_solution([-0.5*dx],w_eq_temp,1)
+        call compute_conservative(w_eq_temp,u_eq_temp,1)
+        call get_eq_solution([0.5*dx],w_eq_temp_0,1)
+        call compute_conservative(w_eq_temp_0,u_eq_temp_0,1)
+        write(*,*) 'u_left - u_eq'
+        write(*,*) u_left(1:nvar,1) - u_eq_temp_0
+        u_tmp(1:nvar)=  u_eq_temp(1:nvar) + u(1:nvar,1,1) - u_eq_temp_0(1:nvar) !exp(-((-0.5*dx)+dx/2.0*chsi_quad(nquad)))+u_right(1:nvar,1)-exp(-((0.5*dx)+dx/2.0*chsi_quad(1)))
+        !u_tmp(2)=-u_tmp(2)
+        select case(riemann)
+        case(1)
+           call riemann_llf(u_tmp,u_left(1:nvar,iright)&
+                & ,flux_riemann,gamma,nvar)
+        case(2)
+           call riemann_hllc(u_tmp,u_left(1:nvar,iright)&
+                & ,flux_riemann,gamma,nvar)
+        end select
+        flux_face(1:nvar,iface)=flux_riemann
+        call compute_flux(u_tmp(1:nvar)  , flux_face(1:nvar,iface),gamma,nvar) !flux_riemann
+     endif
+     if(bc==5.AND.iface==nx+1)then
+        !u_tmp(1:nvar)= u_right(1:nvar,ileft)! exp(-(((nx+0.5)*dx)+dx/2.0*chsi_quad(1))) + u_left(1:nvar,nx) - exp(-(((nx-0.5)*dx)+dx/2.0*chsi_quad(nquad)))
+        !u_tmp(1:nvar)= u_right(1:nvar,nx) 
+        !u_tmp(2)=-u_tmp(2)
+        call get_eq_solution([(nx+0.5)*dx],w_eq_temp,1)
+        call compute_conservative(w_eq_temp,u_eq_temp,1)
+        call get_eq_solution([(nx-0.5)*dx],w_eq_temp_0,1)
+        call compute_conservative(w_eq_temp_0,u_eq_temp_0,1)
+        write(*,*) 'u_right - u_eq'
+        write(*,*) u_right(1:nvar,nx) - u_eq_temp_0
+        u_tmp(1:nvar)= u_eq_temp(1:nvar) + u(1:nvar,1,nx) - u_eq_temp_0(1:nvar)
+
+        select case(riemann)
+        case(1)
+           call riemann_llf(u_right(1:nvar,ileft),u_tmp&
+           &,flux_riemann,gamma,nvar)
+        case(2)
+           call riemann_hllc(u_right(1:nvar,ileft),u_tmp&
+                &,flux_riemann,gamma,nvar)
+        end select
+        flux_face(1:nvar,iface)=flux_riemann
+        call compute_flux(u_tmp(1:nvar), flux_face(1:nvar,iface),gamma,nvar) !flux_riemann
+     endif
+
+  end do
+
+  select case (source)
+     case(1)
+       source_vol(:,:,:) = 0.0
+       source_vol_eq(:,:,:) = 0.0
+     case(2)
+       ! Compute source
+       do icell=1,nx
+          !==================================
+          ! Compute source at quadrature points
+          !==================================
+          ! Loop over quadrature points
+          do j=1,nquad
+             u_quad(1:nvar,j)=0.0
+             u_quad_eq(1:nvar,j)=0.0
+             source_quad(1:nvar,j) = 0.0
+             source_quad_eq(1:nvar,j) = 0.0
+             ! Loop over modes
+             do i=1,n
+                u_quad(1:nvar,j)=u_quad(1:nvar,j)+u(1:nvar,i,icell)*legendre(chsi_quad(j),i-1)
+                u_quad_eq(1:nvar,j)=u_quad_eq(1:nvar,j)+u_eq(1:nvar,i,icell)*legendre(chsi_quad(j),i-1)
+             end do
+             ! Compute source at quadrature points
+             call compute_source(u_quad(1:nvar,j),source_quad(1:nvar,j),chsi_quad(j),gamma,nvar)
+             call compute_source(u_quad_eq(1:nvar,j),source_quad_eq(1:nvar,j),chsi_quad(j),gamma,nvar)
+          end do
+
+          !================================
+          ! Compute source volume integral
+          !================================
+          ! Loop over modes
+          do i=1,n
+             source_vol(1:nvar,i,icell)=0.0
+             source_vol_eq(1:nvar,i,icell)=0.0
+             do j=1,nquad
+                source_vol(1:nvar,i,icell)=source_vol(1:nvar,i,icell)+ &
+                     & source_quad(1:nvar,j)* &
+                     & legendre(chsi_quad(j),i-1)* &
+                     & w_quad(j)
+
+                source_vol_eq(1:nvar,i,icell)=source_vol_eq(1:nvar,i,icell)+ &
+                     & source_quad_eq(1:nvar,j)* &
+                     & legendre(chsi_quad(j),i-1)* &
+                     & w_quad(j)
+             end do
+          end do
+        end do
+  end select
+
+  !========================
+  ! Compute final DG update
+  !========================
+  ! Loop over cells
+  do icell=1,nx
+     ! Loop over modes
+     do i=1,n
+        dudt(1:nvar,i,icell)= oneoverdx*flux_vol(1:nvar,i,icell) &
+             & -oneoverdx*flux_vol_eq(1:nvar,i,icell) &
+             & -oneoverdx*(flux_face(1:nvar,icell+1)*legendre(chsi_right,i-1) &
+             & -flux_face(1:nvar,icell)*legendre(chsi_left,i-1)) &
+             & +oneoverdx*(flux_face_eq(1:nvar,icell+1)*legendre(chsi_right,i-1)  &
+             & -flux_face_eq(1:nvar,icell)*legendre(chsi_left,i-1) ) &
+             & + source_vol(1:nvar,i,icell) - source_vol_eq(1:nvar,i,icell) 
+       if (icell == 1) then
+        write(*,*) 'mode '
+        write(*,*) i
+          write(*,*) 'source 1'
+          write(*,*) source_vol(1:nvar,i,icell) - source_vol_eq(1:nvar,i,icell) 
+          write(*,*) 'flux volume 1'
+          write(*,*) oneoverdx*(flux_vol(1:nvar,i,icell)) -oneoverdx*(flux_vol_eq(1:nvar,i,icell))
+
+          write(*,*) 'flux surface1 '
+          write(*,*) -oneoverdx*(flux_face(1:nvar,icell+1)*legendre(chsi_right,i-1) &
+               & -flux_face(1:nvar,icell)*legendre(chsi_left,i-1)) &
+               & +oneoverdx*(flux_face_eq(1:nvar,icell+1)*legendre(chsi_right,i-1)  &
+               & -flux_face_eq(1:nvar,icell)*legendre(chsi_left,i-1) )
+       end if 
+
+       if (icell == 30) then
+
+        write(*,*) 'mode '
+        write(*,*) i
+          write(*,*) 'source 30'
+          write(*,*) source_vol(1:nvar,i,icell) - source_vol_eq(1:nvar,i,icell) 
+          write(*,*) 'flux 30'
+          write(*,*) oneoverdx*(flux_vol(1:nvar,i,icell)) &
+               & -oneoverdx*(flux_vol_eq(1:nvar,i,icell)) &
+               & -oneoverdx*(flux_face(1:nvar,icell+1)*legendre(chsi_right,i-1) &
+               & -flux_face(1:nvar,icell)*legendre(chsi_left,i-1)) &
+               & +oneoverdx*(flux_face_eq(1:nvar,icell+1)*legendre(chsi_right,i-1)  &
+               & -flux_face_eq(1:nvar,icell)*legendre(chsi_left,i-1) )
+
+      end if 
+
+     end do
+  end do
+
+  !dudt(:,:,1) = 0
+  !dudt(:,:,nx) = 0
+
+
+end subroutine compute_update_exact
+!==============================================
+
+
+!==============================================
+subroutine compute_update_exact_delta(delta_u,u_eq,dudt)
+  use dg_commons
+  implicit none
+  real(kind=8),dimension(1:nvar,1:n,1:nx)::delta_u,dudt
+  real(kind=8),dimension(1:nvar,1:n,1:nx)::u_eq
+  !===========================================================
+  ! This routine computes the DG update for the input state u.
+  !===========================================================
+  real(kind=8),dimension(1:nvar,1:nquad)::u_quad,flux_quad, source_quad
+  real(kind=8),dimension(1:nvar,1:nquad)::u_quad_eq,flux_quad_eq, source_quad_eq
+  real(kind=8),dimension(1:nvar,1:n,1:nx)::flux_vol, source_vol
+  real(kind=8),dimension(1:nvar,1:n,1:nx)::flux_vol_eq, source_vol_eq
+  real(kind=8),dimension(1:nvar,1:nx)::u_left,u_right, u_delta
+  real(kind=8),dimension(1:nvar)::flux_riemann,u_tmp
+  real(kind=8),dimension(1:nvar,1:nx+1)::flux_face,flux_face_eq
+  real(kind=8),dimension(1:nx+1)::x_faces
+
+
+  integer::icell,i,j,iface,ileft,iright,ivar
+  real(kind=8)::legendre,legendre_prime
+  real(kind=8)::chsi_left=-1,chsi_right=+1
+  real(kind=8)::dx,x_quad
+  real(kind=8)::cmax,oneoverdx,c_left,c_right
+  real(kind=8)::x_right,x_left
+  real(kind=8),dimension(1:nvar)::uu_r,uu_l, u_delta_r, u_delta_l, ww_r, ww_l
+  real(kind=8),dimension(1:nvar,1:nx)::u_delta_left,u_delta_right
+  real(kind=8),dimension(1:nvar,1:(nx+1))::u_face_eq, w_face_eq
+
+  real(kind=8),dimension(1:nvar,1:n):: u_left_bc, u_left_bc_nodes, w_0_eq, w_1_eq
+  real(kind=8),dimension(1:nvar,1:n):: u_0_eq, u_1_eq, u_left_bc_nodes_1, u_left_modes_1
+  real(kind=8),dimension(1:n)::x_0_nodes, x_1_nodes
+  real(kind=8),dimension(1:nvar)::u_left_0, uu
+  real(kind=8),dimension(1:nvar)::w_eq_temp,w_eq_temp_0,u_eq_temp,u_eq_temp_0
+
+
+  dx=boxlen/dble(nx)
+  oneoverdx=1./dx
+
+  call gl_quadrature(chsi_quad,w_quad,nquad)
+
+
+
+  do i=1,nx+1
+    x_faces(i) = (i-1)*dx
+    call get_eq_solution(x_faces(i),w_face_eq(1:nvar,i),1)
+    call compute_conservative(w_face_eq(1:nvar,i),u_face_eq(1:nvar,i),1)
+    call compute_flux(u_face_eq(1:nvar,i),flux_face_eq(1:nvar,i),gamma,nvar)
+  end do
+
+  ! Loop over cells
+  do icell=1,nx
+
+     !==================================
+     ! Compute flux at quadrature points
+     !==================================
+     ! Loop over quadrature points
+     do j=1,nquad
+        u_quad(1:nvar,j)=0.0
+        u_quad_eq(1:nvar,j)=0.0
+        ! Loop over modes
+        do i=1,n
+           u_quad(1:nvar,j)=u_quad(1:nvar,j)+delta_u(1:nvar,i,icell)*legendre(chsi_quad(j),i-1)
+        end do
+        ! Compute flux at quadrature points
+        call compute_flux(u_eq(1:nvar,j,icell)+u_quad(1:nvar,j),flux_quad(1:nvar,j),gamma,nvar)
+        call compute_flux(u_eq(1:nvar,j,icell),flux_quad_eq(1:nvar,j),gamma,nvar)
+
+     end do
+     !================================
+     ! Compute volume integral DG term
+     !================================
+     ! Loop over modes
+     do i=1,n
+        flux_vol(1:nvar,i,icell)=0.0
+        flux_vol_eq(1:nvar,i,icell)=0.0
+        ! Loop over quadrature points
+        do j=1,nquad
+           flux_vol(1:nvar,i,icell)=flux_vol(1:nvar,i,icell)+ &
+                & flux_quad(1:nvar,j)* &
+                & legendre_prime(chsi_quad(j),i-1)* &
+                & w_quad(j)
+
+           flux_vol_eq(1:nvar,i,icell)=flux_vol_eq(1:nvar,i,icell)+ &
+                & flux_quad_eq(1:nvar,j)* &
+                & legendre_prime(chsi_quad(j),i-1)* &
+                & w_quad(j)
+        end do
+     end do
+  end do
+
+  !do icell=1,nx
+
+     !==============================
+     ! Compute left and right states
+     ! computing the value AT the node -1 and 1
+     !==============================
+  !   u_left(1:nvar,icell)=0.0
+  !   u_right(1:nvar,icell)=0.0
+     ! Loop over modes
+  !   do i=1,n
+  !      u_left(1:nvar,icell)=u_left(1:nvar,icell)+u(1:nvar,i,icell)*legendre(chsi_left,i-1)
+  !      u_right(1:nvar,icell)=u_right(1:nvar,icell)+u(1:nvar,i,icell)*legendre(chsi_right,i-1)
+  !   end do
+  !end do
+
+  do icell=1,nx
+     !==============================
+     ! Compute left and right states
+     ! computing the value AT the node -1 and 1
+     !==============================
+     !u_delta(1:nvar,icell)=0.0
+     ! Loop over modes
+     u_delta_l = 0.
+     u_delta_r = 0.
+     do i=1,n
+        u_delta_l = u_delta_l+delta_u(1:nvar,i,icell)*legendre(chsi_left,i-1)
+        u_delta_r = u_delta_r+delta_u(1:nvar,i,icell)*legendre(chsi_right,i-1)
+     end do
+     x_left = (icell - 1)*dx!(dble(icell)-0.5)*dx + dx/2.0*(-1) !(dble(icell)-0.5)*dx + dx/2.0*chsi_quad(1)
+     x_right = icell*dx !(dble(icell)-0.5)*dx + dx/2.0*(1) !(dble(icell)-0.5)*dx + dx/2.0*chsi_quad(n)
+     call get_eq_solution([x_right],ww_r,1)
+     call compute_conservative(ww_r,uu_r,1)
+     call get_eq_solution([x_left],ww_l,1)
+     call compute_conservative(ww_l,uu_l,1)
+     !write(*,*) 'udelta_l, u_eq_l'
+     !write(*,*) u_delta_l - uu_l
+     !write(*,*) u_delta_r - uu_r
+     u_delta_left(1:nvar,icell) = u_delta_l !(u_delta_r+u_delta_l)/2. - (uu_r+uu_l)/2.
+     u_delta_right(1:nvar,icell) = u_delta_r !(u_delta_r+u_delta_l)/2. - (uu_r+uu_l)/2.
+  end do
+
+  do icell=1,nx
+
+     !==============================
+     ! Compute left and right states
+     ! computing the value AT the closest node and transporting to the face
+     !==============================
+     !u_left(1:nvar,icell)=0.0
+     !u_right(1:nvar,icell)=0.0
+     ! Loop over modes
+     !do i=1,n
+        u_left(1:nvar,icell)= u_face_eq(1:nvar,icell) + u_delta_left(1:nvar,icell)
+        u_right(1:nvar,icell)= u_face_eq(1:nvar,icell+1) + u_delta_right(1:nvar,icell)
+     !end do
+  end do
+
+
+ ! write(*,*) 'FACE'
+  !write(*,*) u_left - u_face_eq(:,1:nx)
+  !write(*,*) u_right - u_face_eq(:,2:nx+1)
+
+
+  !==========================================
+  ! Compute physical flux from Riemann solver
+  !==========================================
+  ! Loop over faces
+  do iface=1,nx+1
+     ileft=iface-1
+     iright=iface
+     ! Compute physical flux using Riemann solver
+     select case(riemann)
+     case(1)
+        call riemann_llf(u_right(1:nvar,ileft),u_left(1:nvar,iright)&
+             & ,flux_riemann,gamma,nvar)
+     case(2)
+        call riemann_hllc(u_right(1:nvar,ileft),u_left(1:nvar,iright)&
+             & ,flux_riemann,gamma,nvar)
+     end select
+     flux_face(1:nvar,iface)=flux_riemann
+     ! Compute boundary flux for reflexive BC
+     if(bc==4.AND.iface==1)then
+        call get_eq_solution([(-0.5*dx + dx/2.0*(1))],w_eq_temp,1)
+        call compute_conservative(w_eq_temp,u_eq_temp,1)
+        call get_eq_solution([(0.5*dx + dx/2.0*(-1))],w_eq_temp_0,1)
+        call compute_conservative(w_eq_temp_0,u_eq_temp_0,1)
+        write(*,*) 'u_left - u_eq'
+        write(*,*) u_left(1:nvar,1) - u_eq_temp_0
+        u_tmp(1:nvar)=  u_eq_temp(1:nvar) + delta_u(1:nvar,1,1) !exp(-((-0.5*dx)+dx/2.0*chsi_quad(nquad)))+u_right(1:nvar,1)-exp(-((0.5*dx)+dx/2.0*chsi_quad(1)))
+        !u_tmp(2)=-u_tmp(2)
+        select case(riemann)
+        case(1)
+           call riemann_llf(u_tmp,u_left(1:nvar,iright)&
+                & ,flux_riemann,gamma,nvar)
+        case(2)
+           call riemann_hllc(u_tmp,u_left(1:nvar,iright)&
+                & ,flux_riemann,gamma,nvar)
+        end select
+        flux_face(1:nvar,iface)=flux_riemann
+        call compute_flux(u_tmp(1:nvar)  , flux_face(1:nvar,iface),gamma,nvar) !flux_riemann
+     endif
+     if(bc==4.AND.iface==nx+1)then
+        !u_tmp(1:nvar)= u_right(1:nvar,ileft)! exp(-(((nx+0.5)*dx)+dx/2.0*chsi_quad(1))) + u_left(1:nvar,nx) - exp(-(((nx-0.5)*dx)+dx/2.0*chsi_quad(nquad)))
+        !u_tmp(1:nvar)= u_right(1:nvar,nx) 
+        !u_tmp(2)=-u_tmp(2)
+        call get_eq_solution([(nx+0.5)*dx + dx/2.0*(-1)],w_eq_temp,1)
+        call compute_conservative(w_eq_temp,u_eq_temp,1)
+        call get_eq_solution([(nx)*dx],w_eq_temp_0,1)
+        call compute_conservative(w_eq_temp_0,u_eq_temp_0,1)
+        !write(*,*) 'u_right - u_eq'
+        !write(*,*) u_right(1:nvar,nx) - u_eq_temp_0
+        u_tmp(1:nvar)= u_eq_temp(1:nvar) + delta_u(1:nvar,1,nx)
+
+        select case(riemann)
+        case(1)
+           call riemann_llf(u_right(1:nvar,ileft),u_tmp&
+           &,flux_riemann,gamma,nvar)
+        case(2)
+           call riemann_hllc(u_right(1:nvar,ileft),u_tmp&
+                &,flux_riemann,gamma,nvar)
+        end select
+        flux_face(1:nvar,iface)=flux_riemann
+        call compute_flux(u_tmp(1:nvar), flux_face(1:nvar,iface),gamma,nvar) !flux_riemann
+
+     endif
+  end do
+
+  select case (source)
+     case(1)
+       source_vol(:,:,:) = 0.0
+       source_vol_eq(:,:,:) = 0.0
+     case(2)
+       ! Compute source
+       do icell=1,nx
+          !==================================
+          ! Compute source at quadrature points
+          !==================================
+          ! Loop over quadrature points
+          do j=1,nquad
+             u_quad(1:nvar,j)=0.0
+             u_quad_eq(1:nvar,j)=0.0
+             source_quad(1:nvar,j) = 0.0
+             source_quad_eq(1:nvar,j) = 0.0
+             ! Loop over modes
+             do i=1,n
+                u_quad(1:nvar,j)=u_quad(1:nvar,j)+delta_u(1:nvar,i,icell)*legendre(chsi_quad(j),i-1)
+             end do
+             ! Compute source at quadrature points
+             call compute_source(u_eq(1:nvar,j,icell)+u_quad(1:nvar,j),source_quad(1:nvar,j),chsi_quad(j),gamma,nvar)
+             call compute_source(u_eq(1:nvar,j,icell),source_quad_eq(1:nvar,j),chsi_quad(j),gamma,nvar)
+          end do
+
+          !================================
+          ! Compute source volume integral
+          !================================
+          ! Loop over modes
+          do i=1,n
+             source_vol(1:nvar,i,icell)=0.0
+             source_vol_eq(1:nvar,i,icell)=0.0
+             do j=1,nquad
+                source_vol(1:nvar,i,icell)=source_vol(1:nvar,i,icell)+ &
+                     & source_quad(1:nvar,j)* &
+                     & legendre(chsi_quad(j),i-1)* &
+                     & w_quad(j)
+
+                source_vol_eq(1:nvar,i,icell)=source_vol_eq(1:nvar,i,icell)+ &
+                     & source_quad_eq(1:nvar,j)* &
+                     & legendre(chsi_quad(j),i-1)* &
+                     & w_quad(j)
+             end do
+          end do
+        end do
+  end select
+
+  !========================
+  ! Compute final DG update
+  !========================
+  ! Loop over cells
+  do icell=1,nx
+     ! Loop over modes
+     do i=1,n
+        dudt(1:nvar,i,icell)= oneoverdx*flux_vol(1:nvar,i,icell) &
+             & -oneoverdx*flux_vol_eq(1:nvar,i,icell) &
+             & -oneoverdx*(flux_face(1:nvar,icell+1)*legendre(chsi_right,i-1) &
+             & -flux_face(1:nvar,icell)*legendre(chsi_left,i-1)) &
+             & +oneoverdx*(flux_face_eq(1:nvar,icell+1)*legendre(chsi_right,i-1)  &
+             & -flux_face_eq(1:nvar,icell)*legendre(chsi_left,i-1) ) &
+             & + source_vol(1:nvar,i,icell) - source_vol_eq(1:nvar,i,icell) 
+     end do
+  end do
+  dudt(:,:,1) = 0
+  dudt(:,:,nx) = 0
+
+end subroutine compute_update_exact_delta
 !==============================================
