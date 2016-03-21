@@ -271,12 +271,40 @@ program dg
 
      if(integrator=='RKe')then
         call compute_update_exact_delta(delta_u,u_eq, dudt)
+        call limiter_cons(delta_u)
         w1=delta_u+dt*dudt
-        call limiter_cons(w1)
         call compute_update_exact_delta(w1,u_eq, dudt)
+        call limiter_cons(w1)
         delta_u=0.5*delta_u+0.5*w1+0.5*dt*dudt
+     endif
+
+
+     if(integrator=='RKi')then
+
+        call compute_update_exact_delta(delta_u,u_eq, dudt)
+        w1=delta_u+0.391752226571890*dt*dudt
+        call limiter_cons(delta_u)
+
+        call compute_update_exact_delta(w1, u_eq, dudt)
+        w2=0.444370493651235*delta_u+0.555629506348765*w1+0.368410593050371*dt*dudt
+        call limiter_cons(w2)
+
+        call compute_update_exact_delta(w2,u_eq, dudt)
+        w3=0.620101851488403*delta_u+0.379898148511597*w2+0.251891774271694*dt*dudt
+        call limiter_cons(w3)
+
+        call compute_update_exact_delta(w3,u_eq, dudt)
+        w4=0.178079954393132*delta_u+0.821920045606868*w3+0.544974750228521*dt*dudt
+
+        delta_u=0.517231671970585*w2+0.096059710526147*w3+0.063692468666290*dt*dudt
+        call limiter_cons(delta_u)
+
+        call compute_update_exact_delta(w4,u_eq, dudt)
+        delta_u=delta_u+0.386708617503269*w4+0.226007483236906*dt*dudt
         call limiter_cons(delta_u)
      endif
+     !u = u+u_eq
+
 
      !u = u + u_eq
       
@@ -310,27 +338,8 @@ program dg
   
   ureal(:,:,:)=0
   uinit(:,:,:)=0
-  ! reconstruct u from modes
-  do ivar = 1,nvar
-    do icell=1,nx
-       xcell=(dble(icell)-0.5)*dx
-       do i=1,n
-         x_quad=xcell+dx/2.0*chsi_quad(i)
-         !call condinit(x_quad,uu)
-         !uinit(ivar,i,icell) = uu(ivar)
-         do intnode = 1,n
-        ! Loop over quadrature points
-          delta_u_nodes(ivar,i,icell) = delta_u_nodes(ivar, i, icell) +&
-          & delta_u(ivar, intnode ,icell)*legendre(x_quad,intnode-1)
-         end do
-        end do
-      end do
-  end do
 
   ureal = u_eq + delta_u_nodes
-
-  write(*,*) 'END OF SIM'
-  write(*,*) ureal - u_eq
 
 
 !==========================
