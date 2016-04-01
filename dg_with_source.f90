@@ -1000,7 +1000,7 @@ subroutine compute_update(u,dudt)
                 source_vol(1:nvar,i,icell)=source_vol(1:nvar,i,icell)+ &
                      & source_quad(1:nvar,j)* &
                      & legendre(chsi_quad(j),i-1)* &
-                     & w_quad(j)
+                     & w_quad(j) 
              end do
           end do
         end do
@@ -1883,8 +1883,8 @@ subroutine compute_update_exact_delta(delta_u,u_eq,dudt)
      !u_right(1:nvar,icell)=0.0
      ! Loop over modes
      !do i=1,n
-        u_left(1:nvar,icell)= u_face_eq(1:nvar,icell) + u_delta_left(1:nvar,icell)
-        u_right(1:nvar,icell)= u_face_eq(1:nvar,icell+1) + u_delta_right(1:nvar,icell)
+        u_left(1:nvar,icell) = u_face_eq(1:nvar,icell) + u_delta_left(1:nvar,icell)
+        u_right(1:nvar,icell) = u_face_eq(1:nvar,icell+1) + u_delta_right(1:nvar,icell)
      !end do
   end do
 
@@ -1930,7 +1930,7 @@ subroutine compute_update_exact_delta(delta_u,u_eq,dudt)
                 & ,flux_riemann,gamma,nvar)
         end select
         flux_face(1:nvar,iface)=flux_riemann
-        call compute_flux(u_tmp(1:nvar)  , flux_face(1:nvar,iface),gamma,nvar) !flux_riemann
+        call compute_flux(u_tmp(1:nvar), flux_face(1:nvar,iface),gamma,nvar) !flux_riemann
      endif
      if(bc==4.AND.iface==nx+1)then
         !u_tmp(1:nvar)= u_right(1:nvar,ileft)! exp(-(((nx+0.5)*dx)+dx/2.0*chsi_quad(1))) + u_left(1:nvar,nx) - exp(-(((nx-0.5)*dx)+dx/2.0*chsi_quad(nquad)))
@@ -1938,7 +1938,7 @@ subroutine compute_update_exact_delta(delta_u,u_eq,dudt)
         !u_tmp(2)=-u_tmp(2)
         call get_eq_solution([(nx+0.5)*dx + dx/2.0*(-1)],w_eq_temp,1)
         call compute_conservative(w_eq_temp,u_eq_temp,1)
-        call get_eq_solution([(nx)*dx],w_eq_temp_0,1)
+        call get_eq_solution([(nx-0.5)*dx + dx/2.0*(1)],w_eq_temp_0,1)
         call compute_conservative(w_eq_temp_0,u_eq_temp_0,1)
         !write(*,*) 'u_right - u_eq'
         !write(*,*) u_right(1:nvar,nx) - u_eq_temp_0
@@ -1994,12 +1994,12 @@ subroutine compute_update_exact_delta(delta_u,u_eq,dudt)
                 source_vol(1:nvar,i,icell)=source_vol(1:nvar,i,icell)+ &
                      & source_quad(1:nvar,j)* &
                      & legendre(chsi_quad(j),i-1)* &
-                     & w_quad(j)
+                     & w_quad(j)*0.5
 
                 source_vol_eq(1:nvar,i,icell)=source_vol_eq(1:nvar,i,icell)+ &
                      & source_quad_eq(1:nvar,j)* &
                      & legendre(chsi_quad(j),i-1)* &
-                     & w_quad(j)
+                     & w_quad(j)*0.5
              end do
           end do
         end do

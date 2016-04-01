@@ -19,7 +19,7 @@ function legendre(x,n)
   case(6)
      legendre=1.0/16.0*(231.0*x**6-315.0*x**4+105.0*x**2-5.0)
   end select
-  legendre=sqrt(2.0*dble(n)+1.0)*legendre
+  legendre=sqrt((2.0*dble(n)+1.0))*legendre
   return
 end function legendre
 
@@ -44,7 +44,7 @@ function legendre_prime(x,n)
   case(6)
      legendre_prime=1.0/16.0*(1386.0*x**5-1260.0*x**3+210.0*x)
   end select
-  legendre_prime=sqrt(2.0*dble(n)+1.0)*legendre_prime
+  legendre_prime=sqrt((2.0*dble(n)+1.0))*legendre_prime
   return
 end function legendre_prime
 
@@ -82,6 +82,13 @@ subroutine gl_quadrature(x_quad,w_quad,n)
   real(kind=8)::legendre,legendre_prime
 
   !write(*,*)"Computing Gauss-Legendre quadrature points and weights."
+
+  if (n==1) THEN
+    x_quad(1) = 0.0
+    w_quad(1) = 2.0
+    return
+  end if
+
   do i=1,n
      xx=(1.0-0.125/n/n+0.125/n/n/n)* & 
           & cos(dpi*(4.0*dble(i)-1.0)/(4.0*dble(n)+2.0))
