@@ -101,16 +101,16 @@
           w(3,i,j,inti,intj) = 0.
           w(4,i,j,inti,intj) = 0.4
         else if (x(i,j,inti,intj)<0.5 .and. y(i,j,inti,intj)<0.5) then
-          w(1,i,j,inti,intj) = 1.
+          w(1,i,j,inti,intj) = 0.1072
           w(2,i,j,inti,intj) = -0.7259
-          w(3,i,j,inti,intj) = -0.7259
-          w(4,i,j,inti,intj) = 1.
+          w(3,i,j,inti,intj) = -1.4045
+          w(4,i,j,inti,intj) = 0.0439
         else if (x(i,j,inti,intj)>=0.5 .and. y(i,j,inti,intj)<0.5) then
         !else
-          w(1,i,j,inti,intj) = 0.5197
+          w(1,i,j,inti,intj) = 0.2579
           w(2,i,j,inti,intj) = 0.0
-          w(3,i,j,inti,intj) = -0.7259
-          w(4,i,j,inti,intj) = 0.4
+          w(3,i,j,inti,intj) = -1.4045
+          w(4,i,j,inti,intj) = 0.15
         end if
       end do
     end do
@@ -831,7 +831,7 @@ subroutine compute_update(delta_u,u_eq,dudt)
         ileft = 1
       end if
       if (iface == nx+1) then
-        iright = ny
+        iright = nx
       end if
 
         ! subroutine compute_llflux(uleft,uright, f_left,f_right, fgdnv)
@@ -899,11 +899,11 @@ subroutine compute_update(delta_u,u_eq,dudt)
             do intnode = 1,mx
                edge(1:nvar,icell,jcell,i,j,3) = &
                &edge(1:nvar,icell,jcell,i,j, 3) + &
-               &0.5*G(1:nvar, intnode, icell, jcell+1)*legendre(chsi_top,j-1)*legendre(x_quad(intnode),i-1)*w_x_quad(intnode)
+               &0.5*G(1:nvar, intnode, icell, jcell+1)*legendre(chsi_right,j-1)*legendre(x_quad(intnode),i-1)*w_x_quad(intnode)
    
                edge(1:nvar,icell,jcell,i,j,4) = &
                &edge(1:nvar,icell,jcell,i,j,4) + &
-               &0.5*G(1:nvar, intnode, icell, jcell)*legendre(chsi_bottom,j-1)*legendre(x_quad(intnode),i-1)*w_x_quad(intnode)
+               &0.5*G(1:nvar, intnode, icell, jcell)*legendre(chsi_left,j-1)*legendre(x_quad(intnode),i-1)*w_x_quad(intnode)
             end do
             end do
         end do
@@ -943,10 +943,10 @@ subroutine compute_update(delta_u,u_eq,dudt)
     end do
   end do
 
-!  dudt(1:nvar,1,:,:,:) = 0.0
-!  dudt(1:nvar,nx,:,:,:) = 0.0
-!  dudt(1:nvar,:,1,:,:) = 0.0
-!    dudt(1:nvar,:,ny,:,:) = 0.0
+  !dudt(1:nvar,1,:,:,:) = 0.0
+  !dudt(1:nvar,nx,:,:,:) = 0.0
+  !dudt(1:nvar,:,1,:,:) = 0.0
+  !  dudt(1:nvar,:,ny,:,:) = 0.0
 
 end subroutine compute_update
 
