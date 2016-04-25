@@ -5,11 +5,11 @@ function legendre(x,n)
   x=min(max(x,-1.0),1.0)
   select case(n)
   case(0)
-     legendre=1.0
+     legendre=1.0*sqrt(0.5)
   case(1)
-     legendre=x
+     legendre=x*0.5*sqrt(6.)
   case(2)
-     legendre=0.5*(3.0*x**2-1.0)
+     legendre=0.25*(3.0*x**2-1.0)*sqrt(10.)
   case(3)
      legendre=0.5*(5.0*x**3-3.0*x)
   case(4)
@@ -19,7 +19,7 @@ function legendre(x,n)
   case(6)
      legendre=1.0/16.0*(231.0*x**6-315.0*x**4+105.0*x**2-5.0)
   end select
-  legendre=sqrt((2.0*dble(n)+1.0))*legendre
+  !legendre=sqrt((2.0*dble(n)+1.0)/2.)*legendre
   return
 end function legendre
 
@@ -32,9 +32,9 @@ function legendre_prime(x,n)
   case(0)
      legendre_prime=0.0
   case(1)
-     legendre_prime=1.0
+     legendre_prime=1.0*0.5*sqrt(6.)
   case(2)
-     legendre_prime=3.0*x
+     legendre_prime=6.0*x*0.25*sqrt(10.)
   case(3)
      legendre_prime=0.5*(15.0*x**2-3.0)
   case(4)
@@ -44,7 +44,7 @@ function legendre_prime(x,n)
   case(6)
      legendre_prime=1.0/16.0*(1386.0*x**5-1260.0*x**3+210.0*x)
   end select
-  legendre_prime=sqrt((2.0*dble(n)+1.0))*legendre_prime
+  !legendre_prime=sqrt((2.0*dble(n)+1.0)/2.)*legendre_prime
   return
 end function legendre_prime
 
@@ -86,6 +86,24 @@ subroutine gl_quadrature(x_quad,w_quad,n)
   if (n==1) THEN
     x_quad(1) = 0.0
     w_quad(1) = 2.0
+    return
+  end if
+
+  if (n==2) THEN
+    x_quad(1) = -1./dble(3)*sqrt(3.)
+    x_quad(2) = 1./dble(3)*sqrt(3.)
+    w_quad(1) = 1.
+    w_quad(2) = 1.
+    return
+  end if
+
+  if (n==3) THEN
+    x_quad(1) = -1./dble(5)*sqrt(15.)
+    x_quad(2) = 0.0
+    x_quad(3) = 1./dble(5)*sqrt(15.)
+    w_quad(1) = 5./9.
+    w_quad(2) = 8./9.
+    w_quad(3) = 5./9.  
     return
   end if
 
