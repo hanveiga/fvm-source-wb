@@ -348,40 +348,33 @@
     t=0
     iter=0
     do while(t < tend)
-    !do while(iter<5)
+    !do while(iter<1000)
        ! Compute time step
        call compute_max_speed(nodes,cmax)
-       dt=0.5*sqrt(dx*dy)/cmax/((2.0*dble(mx)+1.0)*(2.0*dble(my)+1.0))
-       
+       dt=cfl*sqrt(dx*dy)/cmax/((2.0*dble(mx)+1.0)*(2.0*dble(my)+1.0))
+      call compute_limiter(delta_u)       
       if(solver=='EQL')then
          ! runge kutta 2nd order
-        write(*,*) 'max u'
-        write(*,*) maxval(delta_u)
+
         call compute_update(delta_u,u_eq, dudt)
-        write(*,*) 'delta u should be all equal'
-        write(*,*) maxval(delta_u(1,1:2,:,:,:)-delta_u(2,1:2,:,:,:))
-        write(*,*) maxval(delta_u(1,1:2,:,:,:)-delta_u(3,1:2,:,:,:))
+        
         w1=delta_u+dt*dudt
 
-        write(*,*) 'max u'
-        write(*,*) maxval(w1)
-        !call compute_limiter(w1)
+        call compute_limiter(w1)
         call compute_update(w1,u_eq,dudt)
         delta_u=0.5*delta_u+0.5*w1+0.5*dt*dudt
 
-        write(*,*) 'max u'
-        write(*,*) maxval(delta_u)
-        !call compute_limiter(delta_u)
+        call compute_limiter(delta_u)
       endif
 
      if(solver=='RK3')then
         call compute_update(delta_u,u_eq,dudt)
         w1 = delta_u+dt*dudt
         !call limiter(w1)
-        call compute_update(w1,u_eq,dudt)
+        !call compute_update(w1,u_eq,dudt)
         w2 = 0.75*delta_u+0.25*w1+0.25*dt*dudt
         !call limiter(w2)
-        call compute_update(w2,u_eq,dudt)
+        !call compute_update(w2,u_eq,dudt)
         delta_u = 1.0/3.0*delta_u+2.0/3.0*w2+2.0/3.0*dt*dudt
         !call limiter(delta_u)
      endif
@@ -416,9 +409,6 @@
        write(*,*)'time=',iter,t,dt, cmax
 
        call get_nodes_from_modes(delta_u, nodes, nx, ny, mx, my)
-       !u = u_eq + nodes
-       write(*,*) 'max nodal'
-       write(*,*) maxval(nodes)
     end do
 
     call get_nodes_from_modes(delta_u, nodes, nx, ny, mx, my)
@@ -436,23 +426,62 @@
     real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::u
     real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::w
     real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::nodes
-    integer::i,j,icell,jcell
+    real(kind=8)::limited1,limited2,minmod
+    integer::i,j,icell,jcell, ivar, itop,ibottom,ileft,iright
 
-    call get_nodes_from_modes(u,nodes,nx,ny,mx,my)
-    call compute_primitive(nodes,w,nx,ny,mx,my)
+    ! look at 1st derivatives, u12, u21
 
+    if (mx==1.and.my==1) then
+      ! no limiting when we only have 1st order approx
+      return
+    end if
+
+    ! mean is given by u11
+    do ivar = 1,nvar
     do icell=1,nx
       do jcell = 1,ny
-        do i = 1,mx
-          do j = 1,my
-           if (w(1,icell,jcell,i,j)<1d-10.OR.w(4,icell,jcell,i,j)<1d-10)then
-              u(1:nvar,icell,jcell,2:mx,2:my)=0.0
-              u(1:nvar,icell,jcell,1,1) = max( u(1:nvar,icell,jcell,1,1) , 1d-10)
-           end if
-       end do
-     end do
+        ileft = icell - 1
+        iright = icell + 1
+        itop = jcell + 1
+        ibottom = jcell - 1
+        if (icell == 1) then
+          ileft = nx
+        endif
+        if (icell == nx) then
+          iright = 1
+        endif
+
+        if (jcell == 1) then
+          ibottom = ny 
+        end if
+        if (jcell == ny) then
+          itop = 1 
+        end if
+
+        limited1 = minmod(u(ivar,icell,jcell,1,2), &
+        &u(ivar,iright,jcell,1,1)-u(ivar,icell,jcell,1,1),&
+        &u(ivar,icell,jcell,1,1)-u(ivar,ileft,jcell,1,1))
+
+        limited2 = minmod(u(ivar,icell,jcell,2,1),&
+        &u(ivar,icell,itop,1,1)-u(ivar,icell,jcell,1,1),&
+        &u(ivar,icell,jcell,1,1)-u(ivar,icell,ibottom,1,1))
+
+        if (abs(limited1 - u(ivar,icell,jcell,1,2))<1e-5) then
+          u(ivar,icell,jcell,1,2) = limited1
+        else
+          u(ivar,icell,jcell,1,2:my) = 0.0
+        end if
+
+        if (abs(limited2 - u(ivar,icell,jcell,2,1))<1e-5) then
+          u(ivar,icell,jcell,2,1) = limited2
+        else
+          u(ivar,icell,jcell,2:mx,1) = 0.0
+        end if
+
     end do
-  end do
+   end do
+ end do
+
   ! Update variables with limited states
 
   end subroutine compute_limiter
@@ -471,13 +500,7 @@
       do jcell = 1,ny
        do i=1,mx
         do j=1,my
-         !write(*,*) 'location'
-         !write(*,*) icell, jcell, i, j
          call compute_speed(u(1:nvar,icell,jcell,i,j),speed)
-         !if (speed > 300) then
-         ! cycle
-          !write(*,*) 'speed',speed
-         !end if
          cmax=MAX(cmax,speed) 
         end do
        end do
@@ -495,17 +518,9 @@
     real(kind=8)::cs
     ! Compute primitive variables
     call compute_primitive(u,w,1,1,1,1)
-    !write(*,*) 'u speed'
-    !write(*,*) u
-    !write(*,*) w
     ! Compute sound speed
-    !write(*,*) 'speed of sound'
-    !write(*,*) u(1)
     cs=sqrt(gamma*max(w(4),1d-10)/max(w(1),1d-10))
-    !write(*,*) cs
-    !speed=max(abs(w(2)),abs(w(3)))+cs
     speed=sqrt(w(2)**2+w(3)**2)+cs
-    !speed=100.
   end subroutine compute_speed
 
 
@@ -577,13 +592,6 @@ subroutine compute_flux(u,flux1, flux2, size_x,size_y,order_x,order_y)
     call compute_primitive(u,w,size_x,size_y,order_x,order_y)
     ! Compute flux
 
-
-    !flux(1,:,:,:,:,2) = w(1,:,:,:,:)*w(3,:,:,:,:)
-    !flux(2,:,:,:,:,2) = w(1,:,:,:,:)*w(2,:,:,:,:)*w(3,:,:,:,:)
-    !flux(3,:,:,:,:,2) = w(1,:,:,:,:)*w(3,:,:,:,:)*w(3,:,:,:,:)+w(4,:,:,:,:)
-    !flux(4,:,:,:,:,2) = w(3,:,:,:,:)*u(4,:,:,:,:)+w(3,:,:,:,:)*w(4,:,:,:,:)
-
-
     flux2(1,:,:,:,:)=w(1,:,:,:,:)*w(3,:,:,:,:)
     flux2(2,:,:,:,:)=w(1,:,:,:,:)*w(2,:,:,:,:)*w(3,:,:,:,:)
     flux2(3,:,:,:,:)=w(3,:,:,:,:)*u(3,:,:,:,:)+w(4,:,:,:,:)
@@ -594,21 +602,6 @@ subroutine compute_flux(u,flux1, flux2, size_x,size_y,order_x,order_y)
     flux1(2,:,:,:,:)=w(2,:,:,:,:)*u(2,:,:,:,:)+w(4,:,:,:,:)
     flux1(3,:,:,:,:)=w(1,:,:,:,:)*w(2,:,:,:,:)*w(3,:,:,:,:)
     flux1(4,:,:,:,:)=w(2,:,:,:,:)*u(4,:,:,:,:)+w(2,:,:,:,:)*w(4,:,:,:,:)
-
-    !write (*,*) flux2(:,:,:,:,:)
-
-    write (*,*) 'flux1', maxval(flux1(:,:,:,:,:))
-    write (*,*) 'flux2', maxval(flux2(:,:,:,:,:))
-    !flux(1,:,:,:,:,1)=u(1,:,:,:,:)*w(2,:,:,:,:)
-    !flux(2,:,:,:,:,1)=0.
-    !flux(3,:,:,:,:,1)=0.
-    !flux(4,:,:,:,:,1)=0. 
-
-    !flux(1,:,:,:,:,2) = u(1,:,:,:,:)*w(3,:,:,:,:)
-    !flux(2,:,:,:,:,2) = 0.
-    !flux(3,:,:,:,:,2) = 0.
-    !flux(4,:,:,:,:,2) = 0.
-
 
   end subroutine compute_flux
 
@@ -767,10 +760,10 @@ subroutine compute_update(delta_u,u_eq,dudt)
   flux_vol1(:,:,:,:,:) = 0.0
   flux_vol2(:,:,:,:,:) = 0.0
   !flux_quad(:,:,:,:,:,:) = 0.0
-  write (*,*) 'x quad', x_quad, y_quad
+
   call get_nodes_from_modes(delta_u,u_delta_quad,nx,ny,mx,my)
   call compute_flux(u_delta_quad,flux_quad1,flux_quad2,nx,ny,mx,my)
-  write(*,*) 'fluxquad', maxval(flux_quad2)
+
   
   do icell=1,nx
     do jcell=1,ny
@@ -811,7 +804,7 @@ subroutine compute_update(delta_u,u_eq,dudt)
     end do
   end do
 
-  write(*,*) 'fluxvol', maxval(flux_vol2)
+
     u_delta_l(:,:) = 0.0
     u_delta_r(:,:) = 0.0
     u_delta_t(:,:) = 0.0
@@ -912,10 +905,10 @@ subroutine compute_update(delta_u,u_eq,dudt)
       ileft = iface-1
       iright = iface
       if (iface == 1) then
-        ileft = nx
+        ileft = 1
       end if
       if (iface == nx+1) then
-        iright = 1
+        iright = nx
       end if
 
         ! subroutine compute_llflux(uleft,uright, f_left,f_right, fgdnv)
@@ -936,10 +929,10 @@ subroutine compute_update(delta_u,u_eq,dudt)
         ileft = jface-1
         iright = jface
         if (jface == 1) then
-          ileft = nx
+          ileft = 1
         end if
         if (jface == ny+1) then
-          iright = 1
+          iright = nx
         end if
 
        !call compute_llflux(u_top(1:nvar,i,ileft),u_bottom(1:nvar,i,iright),&
@@ -954,22 +947,6 @@ subroutine compute_update(delta_u,u_eq,dudt)
 
       end do
     end do
-  write(*,*) 'u top'
-
-  write(*,*) maxval(u_top(1,:,:,:,:)),minval(u_top(1,:,:,:,:))
-  write(*,*) maxval(u_bottom(1,:,:,:,:)),minval(u_bottom(1,:,:,:,:))
-  write(*,*) maxval(u_left(1,:,:,:,:)),minval(u_left(1,:,:,:,:))
-  write(*,*) maxval(u_right(1,:,:,:,:)),minval(u_right(1,:,:,:,:))
-
-  write(*,*) maxval(flux_left), minval(flux_left)
-  write(*,*) maxval(flux_right), minval(flux_right)
-
-  write(*,*) maxval(flux_top), minval(flux_top)
-  write(*,*) maxval(flux_bottom), minval(flux_bottom)
-
-  !write(*,*) maxval(G)
-  !write(*,*) 'end'
-
 
   !========================
   ! Compute flux line integral
@@ -1032,41 +1009,11 @@ subroutine compute_update(delta_u,u_eq,dudt)
           &-edge(1:nvar,icell,jcell,i,j,2)) &
           &-oneoverdx*(edge(1:nvar,icell,jcell,i,j,3)&
           &-edge(1:nvar,icell,jcell,i,j,4))
-
-             ! dudt(1:nvar,icell,jcell,i,j) &
-             !& -oneoverdx*(F(1:nvar,j,icell+1,jcell)*&
-            ! & legendre(chsi_right,i-1)*legendre(x_quad(intnode),j-1)*w_x_quad(intnode) &
-            ! & -F(1:nvar,j,icell,jcell)*&
-            ! & legendre(chsi_left,i-1)*legendre(x_quad(intnode),j-1))*w_x_quad(intnode)  &
-            ! & -oneoverdy*(G(1:nvar,i,icell,jcell+1)*&
-            ! & legendre(x_quad(intnode),i-1)*legendre(chsi_top,j-1)*w_x_quad(intnode)  &
-            ! & -G(1:nvar,i,icell,jcell)*legendre(x_quad(intnode),i-1)*w_x_quad(intnode)  &
-            ! & *legendre(chsi_bottom,j-1)) 
-               !& oneoverdx*oneoverdy*flux_vol(1:nvar,icell,icell,i,j) &
-
-!             & + source_vol(1:nvar,icell,jcell,i,j)
-        ! end do
        end do
      end do
     end do
   end do
   !write(*,*) flux_vol(1,1,1,:,:)
 
-  write(*,*) maxval(oneoverdx*flux_vol1(:,:,:,:,:))
-  write(*,*) maxval(oneoverdx*(edge(:,:,:,:,:,1)))
-  write(*,*) maxval(oneoverdx*(edge(:,:,:,:,:,2)))
-
-  write(*,*) maxval(oneoverdx*flux_vol2(:,:,:,:,:))
-  write(*,*) maxval(oneoverdx*(edge(:,:,:,:,:,3)))
-  write(*,*) maxval(oneoverdx*(edge(:,:,:,:,:,4)))
-
-  write(*,*) maxval(F)
-  write(*,*) maxval(G)
-  write(*,*) 'dudt', maxval(dudt(:,:,:,:,:))
-  !dudt(1:nvar,:,:,:,:) = 0.0
-  !dudt(1:nvar,1,:,:,:) = 0.0
-  !dudt(1:nvar,nx,:,:,:) = 0.0
-  !dudt(1:nvar,:,1,:,:) = 0.0
-  !dudt(1:nvar,:,ny,:,:) = 0.0
 
 end subroutine compute_update
