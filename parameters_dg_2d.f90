@@ -1,9 +1,9 @@
 module parameters_dg_2d
   ! solver parameters
-  integer,parameter::nx=25
-  integer,parameter::ny=25
-  integer,parameter::mx=2
-  integer,parameter::my=2
+  integer,parameter::nx=50
+  integer,parameter::ny=50
+  integer,parameter::mx=3
+  integer,parameter::my=3
   
   integer,parameter::nvar=4
   integer,parameter::riemann=2
@@ -12,7 +12,7 @@ module parameters_dg_2d
 
   ! Problem set-up
   integer,parameter::ninit=3
-  integer,parameter::bc=3
+  integer,parameter::bc=2
   integer,parameter::nequilibrium=1
   integer,parameter::source=2
 

@@ -150,6 +150,26 @@
     end do
     end do
     end do
+      case(5)
+        do i = 1,size_x
+          do j = 1,size_y
+            do inti = 1,order_x
+              do intj = 1,order_y
+        if (x(i,j,inti,intj) + y(i,j,inti,intj) >=0.5) then        
+          w(1,i,j,inti,intj) = 1.
+          w(2,i,j,inti,intj)  = 0.
+          w(3,i,j,inti,intj)  = 0.
+          w(4,i,j,inti,intj)  = 1.
+        else if (x(i,j,inti,intj) + y(i,j,inti,intj) <=0.5) then
+          w(1,i,j,inti,intj) = 0.125
+          w(2,i,j,inti,intj) = 0.
+          w(3,i,j,inti,intj) = 0.
+          w(4,i,j,inti,intj) = 0.4
+        end if
+      end do
+    end do
+    end do
+    end do
     end select
 
     call compute_conservative(w,u,size_x,size_y,mx,my)
@@ -348,14 +368,14 @@
     t=0
     iter=0
     do while(t < tend)
-    !do while(iter<1000)
+    !do while(iter<30)
        ! Compute time step
        call compute_max_speed(nodes,cmax)
        dt=cfl*sqrt(dx*dy)/cmax/((2.0*dble(mx)+1.0)*(2.0*dble(my)+1.0))
-      call compute_limiter(delta_u)       
+     
       if(solver=='EQL')then
          ! runge kutta 2nd order
-
+        call compute_limiter(delta_u)  
         call compute_update(delta_u,u_eq, dudt)
         
         w1=delta_u+dt*dudt
@@ -364,7 +384,7 @@
         call compute_update(w1,u_eq,dudt)
         delta_u=0.5*delta_u+0.5*w1+0.5*dt*dudt
 
-        call compute_limiter(delta_u)
+        !call compute_limiter(delta_u)
       endif
 
      if(solver=='RK3')then
@@ -444,19 +464,11 @@
         iright = icell + 1
         itop = jcell + 1
         ibottom = jcell - 1
-        if (icell == 1) then
-          ileft = nx
-        endif
-        if (icell == nx) then
-          iright = 1
-        endif
 
-        if (jcell == 1) then
-          ibottom = ny 
-        end if
-        if (jcell == ny) then
-          itop = 1 
-        end if
+        call get_boundary_conditions(ileft,1)
+        call get_boundary_conditions(iright,1)
+        call get_boundary_conditions(itop,2)
+        call get_boundary_conditions(ibottom,2)
 
         limited1 = minmod(u(ivar,icell,jcell,1,2), &
         &u(ivar,iright,jcell,1,1)-u(ivar,icell,jcell,1,1),&
@@ -486,6 +498,52 @@
 
   end subroutine compute_limiter
   !-----
+
+
+  subroutine get_boundary_conditions(index, dim)
+    use parameters_dg_2d
+
+    integer::index
+    integer::dim
+
+    ! if direction = 1 then its x direction, etc.
+
+    if (dim == 1) then
+      index = index
+      
+      if (bc == 1) then !periodic
+        if (index == 0) then
+          index = nx
+        else if (index == nx+1) then
+          index = 1
+        end if
+      else if (bc == 2) then !transmissive
+        if (index == 0) then
+          index = 1
+        else if (index == nx+1) then
+          index = nx
+        end if
+      end if
+
+    else if(dim == 2) then
+
+      if (bc == 1) then !periodic
+        if (index == 0) then
+          index = ny
+        else if (index == ny+1) then
+          index = 1
+        end if
+      else if (bc == 2) then !transmissive
+        if (index == 0) then
+          index = 1
+        else if (index == ny+1) then
+          index = ny
+        end if
+      end if
+
+    end if
+
+  end subroutine get_boundary_conditions
 
   subroutine compute_max_speed(u,cmax)
     use parameters_dg_2d
@@ -904,12 +962,9 @@ subroutine compute_update(delta_u,u_eq,dudt)
     do iface = 1, nx+1
       ileft = iface-1
       iright = iface
-      if (iface == 1) then
-        ileft = 1
-      end if
-      if (iface == nx+1) then
-        iright = nx
-      end if
+
+      call get_boundary_conditions(ileft,1)
+      call get_boundary_conditions(iright,1)
 
         ! subroutine compute_llflux(uleft,uright, f_left,f_right, fgdnv)
       do intnode = 1, my
@@ -928,13 +983,9 @@ subroutine compute_update(delta_u,u_eq,dudt)
       do jface = 1,ny+1
         ileft = jface-1
         iright = jface
-        if (jface == 1) then
-          ileft = 1
-        end if
-        if (jface == ny+1) then
-          iright = nx
-        end if
 
+        call get_boundary_conditions(ileft,2)
+        call get_boundary_conditions(iright,2)
        !call compute_llflux(u_top(1:nvar,i,ileft),u_bottom(1:nvar,i,iright),&
        !                     &flux_top(1:nvar,i,ileft,2),flux_bottom(1:nvar,i,iright,2),G(1:nvar,i,jface))
       
