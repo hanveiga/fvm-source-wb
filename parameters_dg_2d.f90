@@ -8,11 +8,11 @@ module parameters_dg_2d
   integer,parameter::nvar=4
   integer,parameter::riemann=2
   logical,parameter::use_limiter=.true.
-  character(LEN=3),parameter::solver='EQL' !or EQL to use the equilibrium solution ^^
+  character(LEN=3),parameter::solver='RK3' !or EQL to use the equilibrium solution ^^
 
   ! Problem set-up
-  integer,parameter::ninit=3
-  integer,parameter::bc=2
+  integer,parameter::ninit=1
+  integer,parameter::bc=1
   integer,parameter::nequilibrium=1
   integer,parameter::source=2
 
