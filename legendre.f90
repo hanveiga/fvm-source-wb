@@ -98,9 +98,9 @@ subroutine gl_quadrature(x_quad,w_quad,n)
   end if
 
   if (n==3) THEN
-    x_quad(1) = -1./dble(5)*sqrt(15.)
+    x_quad(1) = -sqrt(3.)/sqrt(5.)
     x_quad(2) = 0.0
-    x_quad(3) = 1./dble(5)*sqrt(15.)
+    x_quad(3) = sqrt(3.)/sqrt(5.)
     w_quad(1) = 5./9.
     w_quad(2) = 8./9.
     w_quad(3) = 5./9.  
