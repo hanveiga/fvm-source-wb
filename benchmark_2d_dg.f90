@@ -75,7 +75,7 @@
 
     select case (ninit)
       case(1)
-        w(1,:,:,:,:) = exp(-((x-0.5)**2+(y-0.5)**2)*20.)
+        w(1,:,:,:,:) = exp(-((x-0.5)**2+(y-0.5)**2)*10.)
         w(2,:,:,:,:) = 1.
         w(3,:,:,:,:) = 1.
         w(4,:,:,:,:) = 1. !exp(-((x-0.5)**2+(y-0.5)**2)*40.) !+ eta*&
@@ -170,6 +170,7 @@
     end do
     end do
     end do
+
     end select
 
     call compute_conservative(w,u,size_x,size_y,mx,my)
@@ -231,7 +232,7 @@ subroutine high_order_limiter(u)
     call compute_primitive(u,w,nx,ny,mx,my)
     ! TODO: implement characteristic variable representation
     ! using Roe average
-
+    write(*,*) u(1,1,1,:,:)
     do ivar = 1,nvar
       do icell=1,nx
         do jcell = 1,ny
@@ -245,13 +246,13 @@ subroutine high_order_limiter(u)
           call get_boundary_conditions(itop,2)
           call get_boundary_conditions(ibottom,2)
 
-          do intnode = mx,1,-1
-            do jntnode = i,1,-1
-              coeff_c = sqrt(2.0*dble(mx+1-intnode)+1.0)*sqrt(2.0*dble(my+1-jntnode)+1.0)/dble(2.0)
-              coeff_minus = sqrt(2.0*dble(mx-intnode)+1.0)*sqrt(2.0*dble(my-jntnode)+1.0)/dble(2.0)
-              coeff_plus = sqrt(2.0*dble(my-jntnode)+1.0)*sqrt(2.0*dble(mx-intnode)+1.0)/dble(2.0)
+          do intnode = mx-1,1,-1
+            do jntnode = intnode,1,-1
+              coeff_c = sqrt(2.0*dble(intnode)+1.0)*sqrt(2.0*dble(jntnode)+1.0)/dble(2.0)
+              coeff_minus = sqrt(2.0*dble(intnode)+1.0)*sqrt(2.0*dble(jntnode)+1.0)/dble(2.0)
+              !coeff_plus = sqrt(2.0*dble(my-jntnode)+1.0)*sqrt(2.0*dble(mx-intnode)+1.0)/dble(2.0)
 
-              central_u = u(ivar,icell,jcell,mx-intnode+1,my-intnode+1)
+              central_u = u(ivar,icell,jcell,intnode+1,jntnode+1)
               
               d_l_x = u(ivar,icell,jcell,mx-intnode,my-intnode) - &
                     & u(ivar,ileft,jcell,mx-intnode,my-intnode)
@@ -264,23 +265,39 @@ subroutine high_order_limiter(u)
 
               d_r_y = u(ivar,icell,itop,mx-intnode,my-intnode) - &
                     & u(ivar,icell,jcell,mx-intnode,my-intnode)
+              write(*,*) 'intnodes', intnode, jntnode
+              write(*,*) 'central u, coeff', central_u, coeff_minus*d_l_x
 
               limited = minmod2d(central_u,coeff_minus*d_l_x,&
                 &coeff_minus*d_l_y, coeff_minus*d_r_y, coeff_minus*d_r_x)
               
               !limited2 = minmod2d(central_u,coeff_minus*d_l_x,&
               !  &coeff_minus*d_l_y, coeff_minus*d_r_y, coeff_minus*d_r_x)
-              
+
 
               write (*,*) 'limited', limited
-              if (abs(limited -   central_u) < 1e-10) then
-                exit
+              if (intnode == jntnode) then
+                if (abs(limited -   central_u) < 1e-10) then
+                  exit
+                end if
               end if
+
               u_new(ivar,icell,jcell,mx-intnode+1,my-intnode+1) = limited
              
             end do
+            write (*,*) 'limited', limited
+              if (intnode == jntnode) then
+                if (abs(limited -   central_u) < 1e-10) then
+                  exit
+                end if
+              end if
           end do
-
+          write (*,*) 'limited', limited
+              if (intnode == jntnode) then
+                if (abs(limited -   central_u) < 1e-10) then
+                  exit
+                end if
+              end if
       end do
      end do
    end do
@@ -459,7 +476,7 @@ subroutine high_order_limiter(u)
     ! internal variables
     real(kind=8)::t,dt
     real(kind=8)::cmax, dx, dy, cs_max,v_xmax,v_ymax
-    real(kind=8),dimension(1:nvar,1:nx, 1:ny,1:mx,1:my)::dudt, w, w1, w2, delta_u,nodes
+    real(kind=8),dimension(1:nvar,1:nx, 1:ny,1:mx,1:my)::dudt, w, w1, w2,w3,w4, delta_u,nodes
     integer::iter, n, i, j
 
     dx = boxlen_x/dble(nx)
@@ -467,74 +484,46 @@ subroutine high_order_limiter(u)
     delta_u(:,:,:,:,:) = 0.0
     call get_modes_from_nodes(u,delta_u, nx, ny, mx, my)
     call get_nodes_from_modes(delta_u,nodes, nx, ny, mx, my)
-
+    write(*,*) 'modes', delta_u(1,2,2,:,:)
     t=0
     iter=0
+
+    !call compute_limiter(delta_u)
     do while(t < tend)
-    !do while(iter<30)
+    !do while(iter<1)
        ! Compute time step
        call compute_max_speed(nodes,cs_max,v_xmax,v_ymax,cmax)
        !dt=cfl*sqrt(dx*dy)/cmax/((2.0*dble(mx)+1.0)*(2.0*dble(my)+1.0))
-        dt = 0.3/(2*3+1)/((v_xmax+cs_max)/dx + (v_xmax+cs_max)/dx)
+        dt = (0.1/(2*3+1))/((abs(v_xmax)+cs_max)/dx + (abs(v_ymax)+cs_max)/dx)
       if(solver=='EQL')then
          ! runge kutta 2nd order
-        call compute_limiter(delta_u)  
+        !call high_order_limiter(delta_u)
+        !call compute_limiter(delta_u)
         call compute_update(delta_u,u_eq, dudt)
         
         w1=delta_u+dt*dudt
 
-        call compute_limiter(w1)
-          call compute_update(w1,u_eq,dudt)
+        !call compute_limiter(w1)
+        call compute_update(w1,u_eq,dudt)
         delta_u=0.5*delta_u+0.5*w1+0.5*dt*dudt
-
         !call compute_limiter(delta_u)
+
       endif
 
-     if(solver=='RK3')then
 
-        !all compute_limiter(delta_u) 
-        !call high_order_limiter(delta_u)
+     if(solver=='RK4')then
         call compute_update(delta_u,u_eq,dudt)
-        w1 = delta_u+dt*dudt
-        !call limiter(w1)
-        !call compute_update(w1,u_eq,dudt)
-
-        !call compute_limiter(w1) 
-        !call high_order_limiter(w1)
-        w2 = 0.75*delta_u+0.25*w1+0.25*dt*dudt
-        !call limiter(w2)
-        !call compute_update(w2,u_eq,dudt)
-        !call high_order_limiter(w2)
-        
-        !call compute_limiter(w2) 
-        delta_u = 1.0/3.0*delta_u+2.0/3.0*w2+2.0/3.0*dt*dudt
-        !call limiter(delta_u)
+        w1=u+0.391752226571890*dt*dudt
+        call compute_update(w1,u_eq,dudt)
+        w2=0.444370493651235*delta_u+0.555629506348765*w1+0.368410593050371*dt*dudt
+        call compute_update(w2,u_eq,dudt)
+        w3=0.620101851488403*delta_u+0.379898148511597*w2+0.251891774271694*dt*dudt
+        call compute_update(w3,u_eq,dudt)
+        w4=0.178079954393132*delta_u+0.821920045606868*w3+0.544974750228521*dt*dudt
+        delta_u=0.517231671970585*w2+0.096059710526147*w3+0.063692468666290*dt*dudt
+        call compute_update(w4,u_eq,dudt)
+        delta_u=delta_u+0.386708617503269*w4+0.226007483236906*dt*dudt
      endif
-
-      !if(solver=='RKi')then
-
-      !  call compute_update(delta_u,u_eq, dudt)
-      !  w1=delta_u+0.391752226571890*dt*dudt
-      !  call limiter_cons(delta_u)
-
-      !  call compute_update(w1, u_eq, dudt)
-      !  w2=0.444370493651235*delta_u+0.555629506348765*w1+0.368410593050371*dt*dudt
-      !  call limiter_cons(w2)
-
-      !  call compute_update(w2,u_eq, dudt)
-      !  w3=0.620101851488403*delta_u+0.379898148511597*w2+0.251891774271694*dt*dudt
-      !  call limiter_cons(w3)
-
-      !  call compute_update(w3,u_eq, dudt)
-      !  w4=0.178079954393132*delta_u+0.821920045606868*w3+0.544974750228521*dt*dudt
-
-      !  delta_u=0.517231671970585*w2+0.096059710526147*w3+0.063692468666290*dt*dudt
-      !  call limiter_cons(delta_u)
-
-      !  call compute_update(w4,u_eq, dudt)
-      !  delta_u=delta_u+0.386708617503269*w4+0.226007483236906*dt*dudt
-      !  call limiter_cons(delta_u)
-      !endif
 
        t=t+dt
        iter=iter+1
@@ -1046,6 +1035,7 @@ subroutine compute_update(delta_u,u_eq,dudt)
                               &flux_top(1:nvar,i,ileft,intnode,1,2),&
                               &flux_bottom(1:nvar,i,iright,intnode,1,2),G(1:nvar,intnode,1,i,jface),2)
         end do
+
     end do
   end do
 
@@ -1127,7 +1117,7 @@ subroutine compute_limiter(u)
     real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::u
     real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::w
     real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::nodes, modes
-    real(kind=8)::limited1,limited2,minmod
+    real(kind=8)::limited1,limited2, minmod
     integer::i,j,icell,jcell, ivar, itop,ibottom,ileft,iright
     integer::intnode, jntnode
 
@@ -1140,6 +1130,7 @@ subroutine compute_limiter(u)
     end if
 
     ! mean is given by u11
+    if (use_limiter) then
       do ivar = 1,nvar
       do icell=1,nx
         do jcell = 1,ny
@@ -1152,6 +1143,7 @@ subroutine compute_limiter(u)
           call get_boundary_conditions(iright,1)
           call get_boundary_conditions(itop,2)
           call get_boundary_conditions(ibottom,2)
+
 
           limited1 = minmod(u(ivar,icell,jcell,1,2), &
           &u(ivar,iright,jcell,1,1)-u(ivar,icell,jcell,1,1),&
@@ -1176,6 +1168,7 @@ subroutine compute_limiter(u)
       end do
      end do
    end do
+  end if
 
  ! guarantee positivity of density and pressure
  call get_nodes_from_modes(u,nodes,nx,ny,mx,my)
