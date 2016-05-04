@@ -20,6 +20,33 @@ function minmod(x,y,z)
   return
 end function minmod
 
+function generalized_minmod(x,y,z)
+  use parameters_dg_2d
+  implicit none
+  ! input
+  real(kind=8)::x,y,z
+
+  ! output
+  real(kind=8)::minmod, dx
+  real(kind=8)::generalized_minmod
+
+  ! internal
+  real(kind=8)::s
+
+  s = sign(1d0,x)
+  dx = boxlen_x/dble(nx)
+
+  if (x < M*dx**2) then
+     generalized_minmod = x 
+  else
+     generalized_minmod = minmod(x,y,z)
+  endif
+
+  !write(*,*) minmod
+  return
+end function generalized_minmod
+
+
 function minmod2d(u,d_l_x,d_l_y,d_r_x,d_r_y)
   implicit none
   ! input
