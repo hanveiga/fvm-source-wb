@@ -170,6 +170,23 @@
     end do
     end do
     end do
+     case(6) ! vortex http://flash.uchicago.edu/~jbgallag/2012/flash4_ug/node34.html
+        do i = 1,size_x
+          do j = 1,size_y
+            do inti = 1,order_x
+              do intj = 1,order_y
+                  w(1,i,j,inti,intj) = 1.
+                  w(2,i,j,inti,intj)  = 1. + &
+                  &5./(2*dpi)*exp(-1-(x(i,j,inti,intj)+&
+                  &y(i,j,inti,intj))**2/2.)*(-y(i,j,inti,intj)+5.)
+                  w(3,i,j,inti,intj)  = 1. + &
+                  &5./(2*dpi)*exp(-1-(x(i,j,inti,intj)+y(i,j,inti,intj))**2/2.)*&
+                  &(x(i,j,inti,intj)-5.)
+                  w(4,i,j,inti,intj)  = 1.
+      end do
+    end do
+    end do
+    end do
 
     end select
 
@@ -488,13 +505,13 @@ subroutine high_order_limiter(u)
     t=0
     iter=0
 
-    !call compute_limiter(delta_u)
+    call compute_limiter(delta_u)
     do while(t < tend)
     !do while(iter<1)
        ! Compute time step
        call compute_max_speed(nodes,cs_max,v_xmax,v_ymax,cmax)
        !dt=cfl*sqrt(dx*dy)/cmax/((2.0*dble(mx)+1.0)*(2.0*dble(my)+1.0))
-        dt = (0.1/(2*3+1))/((abs(v_xmax)+cs_max)/dx + (abs(v_ymax)+cs_max)/dx)
+        dt = (cfl/dble(2*mx+1))/((abs(v_xmax)+cs_max)/dx + (abs(v_ymax)+cs_max)/dx)
       if(solver=='EQL')then
          ! runge kutta 2nd order
         !call high_order_limiter(delta_u)
@@ -503,26 +520,32 @@ subroutine high_order_limiter(u)
         
         w1=delta_u+dt*dudt
 
-        !call compute_limiter(w1)
+        call compute_limiter(w1)
         call compute_update(w1,u_eq,dudt)
         delta_u=0.5*delta_u+0.5*w1+0.5*dt*dudt
-        !call compute_limiter(delta_u)
+        call compute_limiter(delta_u)
 
       endif
 
 
      if(solver=='RK4')then
         call compute_update(delta_u,u_eq,dudt)
-        w1=u+0.391752226571890*dt*dudt
+        w1=delta_u+0.391752226571890*dt*dudt
+        call compute_limiter(w1)
         call compute_update(w1,u_eq,dudt)
         w2=0.444370493651235*delta_u+0.555629506348765*w1+0.368410593050371*dt*dudt
+        call compute_limiter(w2)
         call compute_update(w2,u_eq,dudt)
         w3=0.620101851488403*delta_u+0.379898148511597*w2+0.251891774271694*dt*dudt
+
+        call compute_limiter(w3)
         call compute_update(w3,u_eq,dudt)
         w4=0.178079954393132*delta_u+0.821920045606868*w3+0.544974750228521*dt*dudt
+        call compute_limiter(w4)
         delta_u=0.517231671970585*w2+0.096059710526147*w3+0.063692468666290*dt*dudt
         call compute_update(w4,u_eq,dudt)
         delta_u=delta_u+0.386708617503269*w4+0.226007483236906*dt*dudt
+        call compute_limiter(delta_u)
      endif
 
        t=t+dt
@@ -1117,7 +1140,7 @@ subroutine compute_limiter(u)
     real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::u
     real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::w
     real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::nodes, modes
-    real(kind=8)::limited1,limited2, minmod
+    real(kind=8)::limited1,limited2, generalized_minmod
     integer::i,j,icell,jcell, ivar, itop,ibottom,ileft,iright
     integer::intnode, jntnode
 
@@ -1145,11 +1168,11 @@ subroutine compute_limiter(u)
           call get_boundary_conditions(ibottom,2)
 
 
-          limited1 = minmod(u(ivar,icell,jcell,1,2), &
+          limited1 = generalized_minmod(u(ivar,icell,jcell,1,2), &
           &u(ivar,iright,jcell,1,1)-u(ivar,icell,jcell,1,1),&
           &u(ivar,icell,jcell,1,1)-u(ivar,ileft,jcell,1,1))
 
-          limited2 = minmod(u(ivar,icell,jcell,2,1),&
+          limited2 = generalized_minmod(u(ivar,icell,jcell,2,1),&
           &u(ivar,icell,itop,1,1)-u(ivar,icell,jcell,1,1),&
           &u(ivar,icell,jcell,1,1)-u(ivar,icell,ibottom,1,1))
 
