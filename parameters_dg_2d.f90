@@ -1,9 +1,9 @@
 module parameters_dg_2d
   ! solver parameters
-  integer,parameter::nx=25
-  integer,parameter::ny=25
-  integer,parameter::mx=2
-  integer,parameter::my=2
+  integer,parameter::nx=50
+  integer,parameter::ny=50
+  integer,parameter::mx=1
+  integer,parameter::my=1
   
   integer,parameter::nvar=4
   integer,parameter::riemann=2
@@ -18,9 +18,9 @@ module parameters_dg_2d
   integer,parameter::nequilibrium=1
   integer,parameter::source=2
 
-  real(kind=8)::tend=2.0
-  real(kind=8)::boxlen_x=1.0
-  real(kind=8)::boxlen_y=1.0
+  real(kind=8)::tend=1.
+  real(kind=8)::boxlen_x=6.0
+  real(kind=8)::boxlen_y=6.0
   real(kind=8)::gamma=1.4
   real(kind=8)::cfl = 0.1
 

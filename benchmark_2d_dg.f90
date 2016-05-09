@@ -6,8 +6,6 @@
     real(kind=8),dimension(1:nx,1:ny,1:mx,1:my)::x
     real(kind=8),dimension(1:nx,1:ny,1:mx,1:my)::y
     real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::u, w, u_eq
-    real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::modes, nodes
-
 
     call get_coords(x,y,nx,ny, mx, my)
 
@@ -15,11 +13,9 @@
 
     call output_file(x, y ,u,'initwo')
 
-    !call output_file(x, y ,nodes,'nod')
-
     call get_equilibrium_solution(x, y, u_eq, nx, ny, mx, my)
 
-    call evolve(u, u_eq)
+    call evolve(u, x, y, u_eq)
 
     call output_file(x, y ,u,'fintwo')
 
@@ -68,7 +64,7 @@
 
     select case (ninit)
       case(1)
-        w(1,:,:,:,:) = exp(-((x-0.5)**2+(y-0.5)**2)*10.)
+        w(1,:,:,:,:) = exp(-((x-boxlen_x/2.)**2+(y-boxlen_y/2.)**2)*0.5)
         w(2,:,:,:,:) = 1.
         w(3,:,:,:,:) = 1.
         w(4,:,:,:,:) = 1. !exp(-((x-0.5)**2+(y-0.5)**2)*40.) !+ eta*&
@@ -170,14 +166,14 @@
               do intj = 1,order_y
 
                   w(1,i,j,inti,intj) = 1.*(1. &
-                  &+(gamma-1.)*5/(8*gamma*dpi**2)*exp(1-&
+                  &-(gamma-1.)*5/(8*gamma*dpi**2)*exp(1-&
                   &((x(i,j,inti,intj)-5)**2+(y(i,j,inti,intj)-5)**2)))**(1/(gamma-1))
 
-                  w(2,i,j,inti,intj)  = 1. + &
+                  w(2,i,j,inti,intj) = 2+ &
                   &5./(2*dpi)*exp(-1-((x(i,j,inti,intj)-5)**2+&
                   &(y(i,j,inti,intj)-5)**2)/2.)*(-y(i,j,inti,intj)+5.)
 
-                  w(3,i,j,inti,intj)  = 1. + &
+                  w(3,i,j,inti,intj)  = 2+ &
                   &5./(2*dpi)*exp(-1-((x(i,j,inti,intj)-5)**2+&
                   &(y(i,j,inti,intj)-5)**2)/2.)*&
                   &(x(i,j,inti,intj)-5.)
@@ -357,13 +353,13 @@
 
   end subroutine get_equilibrium_solution
 
-  subroutine evolve(u, u_eq)
+  subroutine evolve(u, x,y, u_eq)
     ! eat real values, spit out real values
     use parameters_dg_2d
     implicit none
 
     real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx,1:my)::u,u_eq
-
+    real(kind=8),dimension(1:nx,1:ny, 1:mx,1:my)::x,y
     ! internal variables
     real(kind=8)::t,dt
     real(kind=8)::cmax, dx, dy, cs_max,v_xmax,v_ymax
@@ -387,12 +383,12 @@
        !dt=cfl*sqrt(dx*dy)/cmax/((2.0*dble(mx)+1.0)*(2.0*dble(my)+1.0))
         dt = (cfl/dble(2*mx+1))/((abs(v_xmax)+cs_max)/dx + (abs(v_ymax)+cs_max)/dx)
       if(solver=='EQL')then
-        call compute_update(delta_u,u_eq, dudt)
+        call compute_update(delta_u,x,y,u_eq, dudt)
         
         w1=delta_u+dt*dudt
 
         call compute_limiter(w1)
-        call compute_update(w1,u_eq,dudt)
+        call compute_update(w1,x,y,u_eq,dudt)
         delta_u=0.5*delta_u+0.5*w1+0.5*dt*dudt
         call compute_limiter(delta_u)
 
@@ -400,21 +396,21 @@
 
 
      if(solver=='RK4')then
-        call compute_update(delta_u,u_eq,dudt)
+        call compute_update(delta_u,x,y,u_eq,dudt)
         w1=delta_u+0.391752226571890*dt*dudt
         call apply_limiter(w1)
-        call compute_update(w1,u_eq,dudt)
+        call compute_update(w1,x,y,u_eq,dudt)
         w2=0.444370493651235*delta_u+0.555629506348765*w1+0.368410593050371*dt*dudt
         call apply_limiter(w2)
-        call compute_update(w2,u_eq,dudt)
+        call compute_update(w2,x,y,u_eq,dudt)
         w3=0.620101851488403*delta_u+0.379898148511597*w2+0.251891774271694*dt*dudt
 
         call apply_limiter(w3)
-        call compute_update(w3,u_eq,dudt)
+        call compute_update(w3,x,y,u_eq,dudt)
         w4=0.178079954393132*delta_u+0.821920045606868*w3+0.544974750228521*dt*dudt
         call apply_limiter(w4)
         delta_u=0.517231671970585*w2+0.096059710526147*w3+0.063692468666290*dt*dudt
-        call compute_update(w4,u_eq,dudt)
+        call compute_update(w4,x,y,u_eq,dudt)
         delta_u=delta_u+0.386708617503269*w4+0.226007483236906*dt*dudt
         call apply_limiter(delta_u)
      endif
@@ -628,29 +624,6 @@ subroutine compute_flux_int(u,flux)
 
   end subroutine compute_flux_int
 
-  subroutine get_source(u,s,size_x,size_y,order_x,order_y)
-    use parameters_dg_2d
-    implicit none
-    integer::size_x, size_y, order_x,order_y
-    real(kind=8),dimension(1:nvar,1:size_x,1:size_y,1:order_x,1:order_y)::u,s
-    real(kind=8),dimension(1:nvar,1:size_x,1:size_y,1:order_x,1:order_y)::w
-    real(kind=8)::phi_x,phi_y
-    !internal
-    phi_x = 0.0
-    phi_y = -0.1
-    !x_minus = [x(1),x(1:size-1)] ! zero gradient
-    !x_plus = [x(2:size),x(size)] ! zero gradient
-    call compute_primitive(u,w,size_x,size_y,order_x,order_y)
-    s(1,:,:,:,:) = 0.
-    s(2,:,:,:,:) = -w(1,:,:,:,:)*phi_x
-    s(3,:,:,:,:) = -w(1,:,:,:,:)*phi_y
-    s(4,:,:,:,:) = -w(1,:,:,:,:)*(w(2,:,:,:,:)*phi_x+w(3,:,:,:,:)*phi_y)
-    !s(1) = 0
-    !  s(2) = -w(1)*1*(x_plus-x_minus)/(2*delta)
-    !  s(3) = -w(1)*w(2)*1*(x_plus-x_minus)/(2*delta)
-
-  end subroutine get_source
-  !--------
 
   subroutine compute_llflux(uleft,uright, f_left,f_right, fgdnv, flag)
     use parameters_dg_2d
@@ -673,29 +646,31 @@ subroutine compute_flux_int(u,flux)
   end subroutine compute_llflux
   !-----
 
-subroutine compute_update(delta_u,u_eq,dudt)
+subroutine compute_update(delta_u,x,y,u_eq,dudt)
   use parameters_dg_2d
   implicit none
   real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx, 1:my)::delta_u,dudt
   real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx, 1:my)::u_eq
   real(kind=8),dimension(1:nvar,1, 1:mx, 1:nx+1, 1:ny)::F
   real(kind=8),dimension(1:nvar,1:mx, 1, 1:nx, 1:ny+1)::G
+
+  real(kind=8),dimension(1:nx,1:ny, 1:mx, 1:my)::x,y
+
+  real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx, 1:my)::s, source_vol
   !===========================================================
   ! This routine computes the DG update for the input state u.
   !===========================================================
   real(kind=8),dimension(1:nx,1:ny, 1:mx, 1:my, 1:nx+1,1:ny+1)::x_faces, y_faces
   real(kind=8),dimension(1:nvar,1:mx,1:my)::u_quad,source_quad
-  !real(kind=8),dimension(1:nvar,1:mx,1:my,2)::flux_quad
-  real(kind=8),dimension(1:nvar,1:mx,1:my)::u_quad_eq,flux_quad_eq, source_quad_eq
-  !real(kind=8),dimension(1:nvar,1:mx,1:my)::u_delta_quad
+  
   real(kind=8),dimension(1:nvar):: u_temp
   real(kind=8),dimension(1:nvar,2):: flux_temp
   real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::u_delta_quad
   real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::flux_quad1
   real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::flux_quad2
 
+
   real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx, 1:my)::flux_vol1, flux_vol2
-  real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx, 1:my)::flux_vol_eq, source_vol_eq
   real(kind=8),dimension(1:nvar, 1:nx,1:ny,1,1:my)::u_left,u_right
   real(kind=8),dimension(1:nvar, 1:nx,1:ny,1:mx,1)::u_top, u_bottom
   real(kind=8),dimension(1:nvar, 1:nx,1:ny,1:mx,1,2)::flux_top, flux_bottom
@@ -946,6 +921,33 @@ subroutine compute_update(delta_u,u_eq,dudt)
   !write(*,*) 'end edge'
 
 
+  source_vol(:,:,:,:,:) = 0.0
+  select case (source)
+     case(1)
+       WRITE(*,*) 'No source'
+     case(2) ! sine wave (tend=1 or 10)
+        call get_source(u_delta_quad,s,x,y)
+       ! evaluate integral
+        do icell=1,nx
+          do jcell = 1,ny
+            do i=1,mx
+              do j=1,my
+                do intnode=1,mx
+                  do jntnode=1,my
+                    source_vol(1:nvar,icell,jcell,i,j) = source_vol(1:nvar,icell,jcell,i,j) + &
+                                              & s(1:nvar,icell,jcell,intnode,jntnode)* &
+                                              & legendre(x_quad(intnode),i-1)* &
+                                              & w_x_quad(intnode)*&
+                                              & legendre(y_quad(jntnode),j-1)* &
+                                              & w_y_quad(jntnode)
+                  end do
+                end do
+              end do
+            end do
+          end do
+        end do
+  end select
+
   !========================
   ! Compute final DG update
   !========================
@@ -962,7 +964,8 @@ subroutine compute_update(delta_u,u_eq,dudt)
           &-oneoverdx*(edge(1:nvar,icell,jcell,i,j,1)&
           &-edge(1:nvar,icell,jcell,i,j,2)) &
           &-oneoverdx*(edge(1:nvar,icell,jcell,i,j,3)&
-          &-edge(1:nvar,icell,jcell,i,j,4))
+          &-edge(1:nvar,icell,jcell,i,j,4)) &
+          & + source_vol(1:nvar,icell,jcell,i,j)
        end do
      end do
     end do
@@ -988,3 +991,65 @@ subroutine apply_limiter(u)
   end if
 
 end subroutine apply_limiter
+
+
+  subroutine get_source(u,s,x,y)
+    use parameters_dg_2d
+    implicit none
+
+    real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::u,s
+    real(kind=8),dimension(1:nvar,1:nx,1:nx,1:my,1:my)::w
+    real(kind=8),dimension(1:nx,1:ny,1:mx,1:my,2)::grad_p
+    real(kind=8),dimension(1:nx,1:ny,1:mx,1:my)::x,y
+
+    call compute_primitive(u,w,nx,ny,mx,my)
+    call grad_phi(u,x,y,grad_p)
+
+    s(1,:,:,:,:) = 0.
+    s(2,:,:,:,:) = -w(1,:,:,:,:)*grad_p(:,:,:,:,1)
+    s(3,:,:,:,:) = -w(1,:,:,:,:)*grad_p(:,:,:,:,2)
+    s(4,:,:,:,:) = -w(1,:,:,:,:)*(w(2,:,:,:,:)*grad_p(:,:,:,:,1)&
+                   &+w(3,:,:,:,:)*grad_p(:,:,:,:,2))
+
+  end subroutine get_source
+  !--------
+
+  subroutine grad_phi(u,x,y, grad_p)
+    use parameters_dg_2d
+    implicit none
+    ! this could be a function by the way
+    real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::u
+    real(kind=8),dimension(1:nx,1:ny,1:mx,1:my,2)::grad_p
+    real(kind=8),dimension(1:nx,1:ny,1:mx,1:my)::x,y
+
+    real(kind=8)::delta_r,x_center,y_center
+    real(kind=8)::x_dash,y_dash, r, epsilon
+
+    integer::i,j,icell,jcell
+
+    epsilon = 0.25
+    delta_r = 0.1
+    x_center = 3.
+    y_center = 3.
+
+    do icell = 1,nx
+      do jcell = 1,ny
+        do i = 1,mx
+          do j = 1,my
+            x_dash = x(icell,jcell,i,j) - x_center
+            y_dash = y(icell,jcell,i,j) - y_center
+            r = sqrt(x_dash**2 + y_dash**2)
+
+            if (r > 0.5-0.5*delta_r) then
+              grad_p(icell,jcell,i,j,1) = -(x_dash)/r**3
+              grad_p(icell,jcell,i,j,2) = -(y_dash)/(r*(r**2+epsilon**2)) 
+            else if (r <= 0.5-0.5*delta_r) then 
+              grad_p(icell,jcell,i,j,1) = -(x_dash)/(r*(r**2+epsilon**2)) 
+              grad_p(icell,jcell,i,j,2) = -(y_dash)/r**3
+            end if             
+          end do
+        end do
+      end do    
+    end do
+
+  end subroutine
