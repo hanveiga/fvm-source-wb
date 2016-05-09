@@ -12,13 +12,6 @@
     call get_coords(x,y,nx,ny, mx, my)
 
     call get_initial_conditions(x,y,u,nx,ny, mx, my)
-    !write(*,*) 'initial condition'
-    !write(*,*) u(1:nvar,:,:,:,:)
-     !call get_modes_from_nodes(u,modes,nx,ny, mx, my)
-
-    !call get_nodes_from_modes(modes,nodes,nx,ny, mx, my)
-
-    !write(*,*) maxval(u-nodes)
 
     call output_file(x, y ,u,'initwo')
 
@@ -175,13 +168,20 @@
           do j = 1,size_y
             do inti = 1,order_x
               do intj = 1,order_y
-                  w(1,i,j,inti,intj) = 1.
-                  w(2,i,j,inti,intj)  = 1. + &
-                  &5./(2*dpi)*exp(-1-(x(i,j,inti,intj)+&
-                  &y(i,j,inti,intj))**2/2.)*(-y(i,j,inti,intj)+5.)
-                  w(3,i,j,inti,intj)  = 1. + &
-                  &5./(2*dpi)*exp(-1-(x(i,j,inti,intj)+y(i,j,inti,intj))**2/2.)*&
+
+                  w(1,i,j,inti,intj) = 1.*(1. &
+                  &-(gamma-1.)*5/(8*gamma*dpi**2)*exp(1-&
+                  &((x(i,j,inti,intj)-5)**2+(y(i,j,inti,intj)-5)**2)))**(1/(gamma-1))
+
+                  w(2,i,j,inti,intj)  = 2. + &
+                  &5./(2*dpi)*exp(-1-((x(i,j,inti,intj)-5)**2+&
+                  &(y(i,j,inti,intj)-5)**2)/2.)*(-y(i,j,inti,intj)+5.)
+
+                  w(3,i,j,inti,intj)  = 2. + &
+                  &5./(2*dpi)*exp(-1-((x(i,j,inti,intj)-5)**2+&
+                  &(y(i,j,inti,intj)-5)**2)/2.)*&
                   &(x(i,j,inti,intj)-5.)
+                  
                   w(4,i,j,inti,intj)  = 1.
       end do
     end do
@@ -216,7 +216,6 @@
        xcell= x_values(icell,jcell,1,1)
        ycell = y_values(icell,jcell,1,1)
        call get_equilibrium_solution([xcell],[ycell],w_eq,one,one,one,one)
-       !w(1:nvar) = function_values(1:nvar,icell,jcell,1,1)
        call compute_primitive(function_values(1:nvar,icell,jcell,1,1),w,one,one,one,one)
        write(10,'(7(1PE12.5,1X))')xcell,ycell,(w(ivar),ivar=1,nvar)
       end do
@@ -226,127 +225,6 @@
   end subroutine output_file
 
   !------
-  
-
-subroutine high_order_limiter(u)
-    use parameters_dg_2d
-    implicit none
-
-    real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::u, u_new
-    real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::w
-    real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::nodes, modes
-    real(kind=8)::limited,minmod2d, d_l_x, d_l_y, d_r_x, d_r_y
-    real(kind=8)::coeff_plus,coeff_minus,coeff_c,central_u
-    integer::i,j,icell,jcell, ivar, itop,ibottom,ileft,iright
-    integer::intnode, jntnode
-
-    if (mx==1.and.my==1) then
-      ! no limiting when we only have 1st order approx
-      !use_limiter = .false.
-      return
-    end if
-
-    call compute_primitive(u,w,nx,ny,mx,my)
-    ! TODO: implement characteristic variable representation
-    ! using Roe average
-    write(*,*) u(1,1,1,:,:)
-    do ivar = 1,nvar
-      do icell=1,nx
-        do jcell = 1,ny
-          ileft = icell - 1
-          iright = icell + 1
-          itop = jcell + 1
-          ibottom = jcell - 1
-
-          call get_boundary_conditions(ileft,1)
-          call get_boundary_conditions(iright,1)
-          call get_boundary_conditions(itop,2)
-          call get_boundary_conditions(ibottom,2)
-
-          do intnode = mx-1,1,-1
-            do jntnode = intnode,1,-1
-              coeff_c = sqrt(2.0*dble(intnode)+1.0)*sqrt(2.0*dble(jntnode)+1.0)/dble(2.0)
-              coeff_minus = sqrt(2.0*dble(intnode)+1.0)*sqrt(2.0*dble(jntnode)+1.0)/dble(2.0)
-              !coeff_plus = sqrt(2.0*dble(my-jntnode)+1.0)*sqrt(2.0*dble(mx-intnode)+1.0)/dble(2.0)
-
-              central_u = u(ivar,icell,jcell,intnode+1,jntnode+1)
-              
-              d_l_x = u(ivar,icell,jcell,mx-intnode,my-intnode) - &
-                    & u(ivar,ileft,jcell,mx-intnode,my-intnode)
-
-              d_l_y = u(ivar,icell,jcell,mx-intnode,my-intnode) - &
-                    & u(ivar,icell,ibottom,mx-intnode,my-intnode)
-
-              d_r_x = u(ivar,iright,jcell,mx-intnode,my-intnode) - &
-                    & u(ivar,icell,jcell,mx-intnode,my-intnode)
-
-              d_r_y = u(ivar,icell,itop,mx-intnode,my-intnode) - &
-                    & u(ivar,icell,jcell,mx-intnode,my-intnode)
-              write(*,*) 'intnodes', intnode, jntnode
-              write(*,*) 'central u, coeff', central_u, coeff_minus*d_l_x
-
-              limited = minmod2d(central_u,coeff_minus*d_l_x,&
-                &coeff_minus*d_l_y, coeff_minus*d_r_y, coeff_minus*d_r_x)
-              
-              !limited2 = minmod2d(central_u,coeff_minus*d_l_x,&
-              !  &coeff_minus*d_l_y, coeff_minus*d_r_y, coeff_minus*d_r_x)
-
-
-              write (*,*) 'limited', limited
-              if (intnode == jntnode) then
-                if (abs(limited -   central_u) < 1e-10) then
-                  exit
-                end if
-              end if
-
-              u_new(ivar,icell,jcell,mx-intnode+1,my-intnode+1) = limited
-             
-            end do
-            write (*,*) 'limited', limited
-              if (intnode == jntnode) then
-                if (abs(limited -   central_u) < 1e-10) then
-                  exit
-                end if
-              end if
-          end do
-          write (*,*) 'limited', limited
-              if (intnode == jntnode) then
-                if (abs(limited -   central_u) < 1e-10) then
-                  exit
-                end if
-              end if
-      end do
-     end do
-   end do
-
- ! guarantee positivity of density and pressure
- call get_nodes_from_modes(u_new,nodes,nx,ny,mx,my)
- call compute_primitive(nodes,w,nx,ny,mx,my)
-
-  do icell=1,nx
-    do jcell = 1,ny
-      do intnode = 1,mx
-        do jntnode = 1,my
-
-          if (w(1,icell,jcell,intnode,jntnode)<1e-10) then
-            w(1,icell,jcell,intnode,jntnode) = 0.0
-          end if
-
-          if (w(4,icell,jcell,intnode,jntnode)<1e-10) then
-            w(4,icell,jcell,intnode,jntnode) = 0.0
-          end if  
-
-        end do
-      end do
-    end do
-  end do
- 
-  call compute_conservative(w,nodes,nx,ny,mx,my)
-  call get_modes_from_nodes(nodes, u_new, nx, ny, mx, my)
-  ! Update variables with limited states
-  u = u_new
-
-  end subroutine high_order_limiter
 
   subroutine get_modes_from_nodes(nodes, u, size_x, size_y, order_x, order_y)
   use parameters_dg_2d
@@ -381,8 +259,6 @@ subroutine high_order_limiter(u)
         do xquad=1,mx ! for more general use n_x_quad...
           do yquad=1,my
            ! Quadrature point in physical space
-           !x_val_quad=xcell+dx/2.0*x_quad(xquad)
-           !y_val_quad=ycell+dy/2.0*y_quad(yquad)
            ! Perform integration using GL quadrature
            u(1:nvar,icell,jcell,i,j)=u(1:nvar,icell,jcell,i,j)+ &
                 & nodes(1:nvar,icell,jcell,xquad,yquad)* &
@@ -448,8 +324,6 @@ subroutine high_order_limiter(u)
 
   end subroutine get_nodes_from_modes
 
-
-
   subroutine get_equilibrium_solution(x,y,w, size_x,size_y, order_x, order_y)
     ! get equilibrium solution for primitive variables
     ! use parameters
@@ -505,7 +379,7 @@ subroutine high_order_limiter(u)
     t=0
     iter=0
 
-    call compute_limiter(delta_u)
+    call apply_limiter(delta_u)
     do while(t < tend)
     !do while(iter<1)
        ! Compute time step
@@ -513,9 +387,6 @@ subroutine high_order_limiter(u)
        !dt=cfl*sqrt(dx*dy)/cmax/((2.0*dble(mx)+1.0)*(2.0*dble(my)+1.0))
         dt = (cfl/dble(2*mx+1))/((abs(v_xmax)+cs_max)/dx + (abs(v_ymax)+cs_max)/dx)
       if(solver=='EQL')then
-         ! runge kutta 2nd order
-        !call high_order_limiter(delta_u)
-        !call compute_limiter(delta_u)
         call compute_update(delta_u,u_eq, dudt)
         
         w1=delta_u+dt*dudt
@@ -531,21 +402,21 @@ subroutine high_order_limiter(u)
      if(solver=='RK4')then
         call compute_update(delta_u,u_eq,dudt)
         w1=delta_u+0.391752226571890*dt*dudt
-        call compute_limiter(w1)
+        call apply_limiter(w1)
         call compute_update(w1,u_eq,dudt)
         w2=0.444370493651235*delta_u+0.555629506348765*w1+0.368410593050371*dt*dudt
-        call compute_limiter(w2)
+        call apply_limiter(w2)
         call compute_update(w2,u_eq,dudt)
         w3=0.620101851488403*delta_u+0.379898148511597*w2+0.251891774271694*dt*dudt
 
-        call compute_limiter(w3)
+        call apply_limiter(w3)
         call compute_update(w3,u_eq,dudt)
         w4=0.178079954393132*delta_u+0.821920045606868*w3+0.544974750228521*dt*dudt
-        call compute_limiter(w4)
+        call apply_limiter(w4)
         delta_u=0.517231671970585*w2+0.096059710526147*w3+0.063692468666290*dt*dudt
         call compute_update(w4,u_eq,dudt)
         delta_u=delta_u+0.386708617503269*w4+0.226007483236906*dt*dudt
-        call compute_limiter(delta_u)
+        call apply_limiter(delta_u)
      endif
 
        t=t+dt
@@ -557,14 +428,9 @@ subroutine high_order_limiter(u)
 
     call get_nodes_from_modes(delta_u, nodes, nx, ny, mx, my)
 
-    ! update u
-    !u = u_eq + nodes
     u = nodes
   end subroutine evolve
 
-
-
-  
   !-----
 
   !subroutine get_characteristic_variables(du,dw,w)
@@ -677,12 +543,6 @@ subroutine high_order_limiter(u)
     integer::flag
     ! Compute primitive variables
     call compute_primitive(u,w,1,1,1,1)
-    !write(*,*) 'u speed'
-    !write(*,*) u
-    !write(*,*) w
-    ! Compute sound speed
-    !write(*,*) 'speed of sound'
-    !write(*,*) u(1)
     cs=sqrt(gamma*max(1.,1d-10)/max(w(1),1d-10))
     !write(*,*) cs
     !speed=max(abs(w(2)),abs(w(3)))+cs
@@ -747,8 +607,6 @@ subroutine compute_flux(u,flux1, flux2, size_x,size_y,order_x,order_y)
 
   end subroutine compute_flux
 
-
-
 subroutine compute_flux_int(u,flux)
     use parameters_dg_2d
     real(kind=8),dimension(1:nvar)::u
@@ -763,26 +621,10 @@ subroutine compute_flux_int(u,flux)
     flux(3,1)=w(1)*w(2)*w(3)
     flux(4,1)=w(2)*u(4)+w(2)*w(4)
 
-    !flux(1,2) = u(1)*w(3)
-    !flux(2,2) = w(1)*w(2)*w(3)
-    !flux(3,2) = w(1)*(3)*w(3)+w(4)
-    !flux(4,2) = w(3)*u(4)+w(3)*w(4)
-
     flux(1,2)=w(3)*u(1)
     flux(2,2)=w(1)*w(2)*w(3)
     flux(3,2)=w(3)*u(3)+w(4)
     flux(4,2)=w(3)*u(4)+w(3)*w(4)
-    
-    !flux(1,1)=w(2)*u(1)
-    !flux(2,1)=0.
-    !flux(3,1)=0.
-    !flux(4,1)=0.
-
-    !flux(1,2) = u(1)*w(3)
-    !flux(2,2) = 0.
-    !flux(3,2) = 0.
-    !flux(4,2) = 0.
-
 
   end subroutine compute_flux_int
 
@@ -792,8 +634,6 @@ subroutine compute_flux_int(u,flux)
     integer::size_x, size_y, order_x,order_y
     real(kind=8),dimension(1:nvar,1:size_x,1:size_y,1:order_x,1:order_y)::u,s
     real(kind=8),dimension(1:nvar,1:size_x,1:size_y,1:order_x,1:order_y)::w
-    !real(kind=8),dimension(1:size_x,1:size_y)::x
-    !real(kind=8),dimension(1:size_x,1:size_y)::y
     real(kind=8)::phi_x,phi_y
     !internal
     phi_x = 0.0
@@ -1129,93 +969,22 @@ subroutine compute_update(delta_u,u_eq,dudt)
   end do
   !write(*,*) flux_vol(1,1,1,:,:)
 
-
 end subroutine compute_update
 
+subroutine apply_limiter(u)
+  use parameters_dg_2d
+  implicit none
 
+  real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::u
 
-subroutine compute_limiter(u)
-    use parameters_dg_2d
-    implicit none
-    real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::u
-    real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::w
-    real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::nodes, modes
-    real(kind=8)::limited1,limited2, generalized_minmod
-    integer::i,j,icell,jcell, ivar, itop,ibottom,ileft,iright
-    integer::intnode, jntnode
-
-    ! look at 1st derivatives, u12, u21
-
-    if (mx==1.and.my==1) then
-      ! no limiting when we only have 1st order approx
-      !use_limiter = .false.
-      return
+  if(use_limiter) then
+    if (limiter_type == '1OR') then
+      call compute_limiter(u)
+    else if (limiter_type == 'HIO') then
+      call high_order_limiter(u)
+    else if (limiter_type=='LOW') then
+      call limiter_low_order(u)
     end if
-
-    ! mean is given by u11
-    if (use_limiter) then
-      do ivar = 1,nvar
-      do icell=1,nx
-        do jcell = 1,ny
-          ileft = icell - 1
-          iright = icell + 1
-          itop = jcell + 1
-          ibottom = jcell - 1
-
-          call get_boundary_conditions(ileft,1)
-          call get_boundary_conditions(iright,1)
-          call get_boundary_conditions(itop,2)
-          call get_boundary_conditions(ibottom,2)
-
-
-          limited1 = generalized_minmod(u(ivar,icell,jcell,1,2), &
-          &u(ivar,iright,jcell,1,1)-u(ivar,icell,jcell,1,1),&
-          &u(ivar,icell,jcell,1,1)-u(ivar,ileft,jcell,1,1))
-
-          limited2 = generalized_minmod(u(ivar,icell,jcell,2,1),&
-          &u(ivar,icell,itop,1,1)-u(ivar,icell,jcell,1,1),&
-          &u(ivar,icell,jcell,1,1)-u(ivar,icell,ibottom,1,1))
-
-          if (abs(limited1 - u(ivar,icell,jcell,1,2))<1e-5) then
-            u(ivar,icell,jcell,1,2) = limited1
-          else
-            u(ivar,icell,jcell,1,2:my) = 0.0
-          end if
-
-          if (abs(limited2 - u(ivar,icell,jcell,2,1))<1e-5) then
-            u(ivar,icell,jcell,2,1) = limited2
-          else
-            u(ivar,icell,jcell,2:mx,1) = 0.0
-          end if
-
-      end do
-     end do
-   end do
   end if
 
- ! guarantee positivity of density and pressure
- call get_nodes_from_modes(u,nodes,nx,ny,mx,my)
- call compute_primitive(nodes,w,nx,ny,mx,my)
-
-  do icell=1,nx
-    do jcell = 1,ny
-      do intnode = 1,mx
-        do jntnode = 1,my
-          if (w(1,icell,jcell,intnode,jntnode)<1e-10) then
-            w(1,icell,jcell,intnode,jntnode) = 0.0
-          end if
-
-          if (w(4,icell,jcell,intnode,jntnode)<1e-10) then
-            w(4,icell,jcell,intnode,jntnode) = 0.0
-          end if  
-
-        end do
-      end do
-    end do
-  end do
- 
-  call compute_conservative(w,nodes,nx,ny,mx,my)
-  call get_modes_from_nodes(nodes, u, nx, ny, mx, my)
-  ! Update variables with limited states
-
-  end subroutine compute_limiter
+end subroutine apply_limiter
