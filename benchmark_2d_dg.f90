@@ -170,19 +170,19 @@
               do intj = 1,order_y
 
                   w(1,i,j,inti,intj) = 1.*(1. &
-                  &-(gamma-1.)*5/(8*gamma*dpi**2)*exp(1-&
+                  &+(gamma-1.)*5/(8*gamma*dpi**2)*exp(1-&
                   &((x(i,j,inti,intj)-5)**2+(y(i,j,inti,intj)-5)**2)))**(1/(gamma-1))
 
-                  w(2,i,j,inti,intj)  = 2. + &
+                  w(2,i,j,inti,intj)  = 1. + &
                   &5./(2*dpi)*exp(-1-((x(i,j,inti,intj)-5)**2+&
                   &(y(i,j,inti,intj)-5)**2)/2.)*(-y(i,j,inti,intj)+5.)
 
-                  w(3,i,j,inti,intj)  = 2. + &
+                  w(3,i,j,inti,intj)  = 1. + &
                   &5./(2*dpi)*exp(-1-((x(i,j,inti,intj)-5)**2+&
                   &(y(i,j,inti,intj)-5)**2)/2.)*&
                   &(x(i,j,inti,intj)-5.)
                   
-                  w(4,i,j,inti,intj)  = 1.
+                  w(4,i,j,inti,intj)  = w(1,i,j,inti,intj)**gamma
       end do
     end do
     end do
