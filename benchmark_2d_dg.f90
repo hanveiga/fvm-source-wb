@@ -52,15 +52,19 @@
   !-------
   subroutine get_initial_conditions(x,y,u,size_x,size_y, order_x, order_y)
     use parameters_dg_2d
+    implicit none
     integer::size_x,size_y, i ,j, order_x, order_y 
     real(kind=8),dimension(1:nvar,1:size_x, 1:size_y, 1:order_x, 1:order_y)::u
     real(kind=8),dimension(1:size_x, size_y,1:order_x, 1:order_y)::x
     real(kind=8),dimension(1:size_x,size_y,1:order_x, 1:order_y)::y
-    integer::inti,intj
+    integer::inti,intj, jcell, icell
     ! internal variables
     real(kind=8),dimension(1:nvar,1:size_x, 1:size_y, 1:order_x, 1:order_y)::w
     real(kind=8)::rho_0, p_0, g
     real(kind=8)::dpi=acos(-1d0)
+
+    ! smooth rotating disk
+    real(kind=8)::x_dash, y_dash, r, rho_d, delta_r, x_center, y_center
 
     select case (ninit)
       case(1)
@@ -183,6 +187,50 @@
     end do
     end do
     end do
+    case(7) ! smooth rotating disk
+      ! initialize variables for smooth rotating disk
+      p_0 = 10e-5
+      rho_0 = 10e-5
+      rho_d = 1
+      delta_r = 0.1
+      x_center = 3.
+      y_center = 3.
+      w(1,:,:,:,:) = 0.0
+      do i = 1,size_x
+          do j = 1,size_y
+            do inti = 1,order_x
+              do intj = 1,order_y
+                x_dash = x(i,j,inti,intj) - x_center
+                y_dash = y(i,j,inti,intj) - y_center
+                r = sqrt(x_dash**2 + y_dash**2)
+
+                if (r<=0.5-delta_r/2.) then
+                  w(1,i,j,inti,intj) = rho_0
+                else if ((r<=0.5+delta_r/2.).and.(r > 0.5-delta_r/2.+0.001)) then
+                !else if ((r<=1+delta_r/2.).and.(r>1-delta_r/2.)) then
+                  w(1,i,j,inti,intj) = (rho_d-rho_0)/delta_r * (r - (0.5-delta_r/2.)) + rho_0
+                else if ((r > 0.5+delta_r/2.).and.(r <= 2-delta_r/2.))  then
+                  w(1,i,j,inti,intj) = rho_d
+                else if ((r > 2-delta_r/2.).and.(r <= 2+delta_r/2.))  then
+                  w(1,i,j,inti,intj) = (rho_0-rho_d)/delta_r * (r - (2-delta_r/2.)) + rho_d
+                else if (r > 2+delta_r/2.) then
+                  w(1,i,j,inti,intj) = rho_0
+                end if
+
+
+                if ((r > 0.5 - 2*delta_r).and.(r < 2+2*delta_r)) then
+                  w(2,i,j,inti,intj) = -y_dash/r**(3./2.)
+                  w(3,i,j,inti,intj) = x_dash/r**(3./2.)
+                else
+                  w(2,i,j,inti,intj) = 0.
+                  w(3,i,j,inti,intj) = 0.
+                end if
+                  
+                w(4,i,j,inti,intj)  = p_0
+            end do
+          end do
+        end do
+      end do
 
     end select
 
