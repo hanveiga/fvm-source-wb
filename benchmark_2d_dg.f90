@@ -189,8 +189,8 @@
     end do
     case(7) ! smooth rotating disk
       ! initialize variables for smooth rotating disk
-      p_0 = 10e-5
-      rho_0 = 10e-5
+      p_0 = 1e-4
+      rho_0 = 1e-4
       rho_d = 1
       delta_r = 0.1
       x_center = 3.
@@ -216,7 +216,6 @@
                 else if (r > 2+delta_r/2.) then
                   w(1,i,j,inti,intj) = rho_0
                 end if
-
 
                 if ((r > 0.5 - 2*delta_r).and.(r < 2+2*delta_r)) then
                   w(2,i,j,inti,intj) = -y_dash/r**(3./2.)
@@ -425,11 +424,13 @@
 
     call apply_limiter(delta_u)
     do while(t < tend)
-    !do while(iter<1)
+    !do while(iter<10)
        ! Compute time step
        call compute_max_speed(nodes,cs_max,v_xmax,v_ymax,cmax)
+       write(*,*) 'cmax=',cmax
+       write(*,*) 'csmax, umax,vmax= ', cs_max, v_xmax, v_ymax
        !dt=cfl*sqrt(dx*dy)/cmax/((2.0*dble(mx)+1.0)*(2.0*dble(my)+1.0))
-        dt = (cfl/dble(2*mx+1))/((abs(v_xmax)+cs_max)/dx + (abs(v_ymax)+cs_max)/dx)
+       dt = (cfl/dble(2*4+1))/((abs(v_xmax)+cs_max)/dx + (abs(v_ymax)+cs_max)/dx)
       if(solver=='EQL')then
         call compute_update(delta_u,x,y,u_eq, dudt)
         
@@ -995,7 +996,7 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
           end do
         end do
   end select
-
+  write(*,*) 'max source', maxval(source_vol)
   !========================
   ! Compute final DG update
   !========================
@@ -1089,10 +1090,10 @@ end subroutine apply_limiter
             r = sqrt(x_dash**2 + y_dash**2)
 
             if (r > 0.5-0.5*delta_r) then
-              grad_p(icell,jcell,i,j,1) = -(x_dash)/r**3
+              grad_p(icell,jcell,i,j,1) = -(x_dash)/(r*(r**2+epsilon**2)) 
               grad_p(icell,jcell,i,j,2) = -(y_dash)/(r*(r**2+epsilon**2)) 
             else if (r <= 0.5-0.5*delta_r) then 
-              grad_p(icell,jcell,i,j,1) = -(x_dash)/(r*(r**2+epsilon**2)) 
+              grad_p(icell,jcell,i,j,1) = -(x_dash)/r**3
               grad_p(icell,jcell,i,j,2) = -(y_dash)/r**3
             end if             
           end do
