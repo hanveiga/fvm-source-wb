@@ -24,6 +24,7 @@
   !---------
   subroutine get_coords(x,y,size_x,size_y, order_x, order_y)
     use parameters_dg_2d
+    implicit none
     integer::size_x,size_y, order_x, order_y
     real(kind=8),dimension(1:size_x,1:size_y,1:order_x,1:order_y)::x,y
 
@@ -189,13 +190,13 @@
     end do
     case(7) ! smooth rotating disk
       ! initialize variables for smooth rotating disk
-      p_0 = 1e-4
-      rho_0 = 1e-4
+      p_0 = 10e-5
+      rho_0 = 10e-5
       rho_d = 1
       delta_r = 0.1
       x_center = 3.
       y_center = 3.
-      w(1,:,:,:,:) = 0.0
+      w(1,:,:,:,:) = rho_0
       do i = 1,size_x
           do j = 1,size_y
             do inti = 1,order_x
@@ -216,6 +217,7 @@
                 else if (r > 2+delta_r/2.) then
                   w(1,i,j,inti,intj) = rho_0
                 end if
+
 
                 if ((r > 0.5 - 2*delta_r).and.(r < 2+2*delta_r)) then
                   w(2,i,j,inti,intj) = -y_dash/r**(3./2.)
@@ -423,13 +425,13 @@
     iter=0
 
     call apply_limiter(delta_u)
-    do while(t < tend)
-    !do while(iter<10)
+    !do while(t < tend)
+    do while(iter<1000)
        ! Compute time step
        call compute_max_speed(nodes,cs_max,v_xmax,v_ymax,cmax)
        write(*,*) 'cmax=',cmax
        write(*,*) 'csmax, umax,vmax= ', cs_max, v_xmax, v_ymax
-       !dt=cfl*sqrt(dx*dy)/cmax/((2.0*dble(mx)+1.0)*(2.0*dble(my)+1.0))
+       dt=cfl*sqrt(dx*dy)/cmax/((2.0*dble(mx)+1.0)*(2.0*dble(my)+1.0))
        dt = (cfl/dble(2*4+1))/((abs(v_xmax)+cs_max)/dx + (abs(v_ymax)+cs_max)/dx)
       if(solver=='EQL')then
         call compute_update(delta_u,x,y,u_eq, dudt)
@@ -588,7 +590,7 @@
     integer::flag
     ! Compute primitive variables
     call compute_primitive(u,w,1,1,1,1)
-    cs=sqrt(gamma*max(1.,1d-10)/max(w(1),1d-10))
+    cs=sqrt(gamma*max(w(4),1d-10)/max(w(1),1d-10))
     !write(*,*) cs
     !speed=max(abs(w(2)),abs(w(3)))+cs
     if (flag == 1) then
@@ -1090,11 +1092,11 @@ end subroutine apply_limiter
             r = sqrt(x_dash**2 + y_dash**2)
 
             if (r > 0.5-0.5*delta_r) then
-              grad_p(icell,jcell,i,j,1) = -(x_dash)/(r*(r**2+epsilon**2)) 
-              grad_p(icell,jcell,i,j,2) = -(y_dash)/(r*(r**2+epsilon**2)) 
+              grad_p(icell,jcell,i,j,1) = -(x_dash)/(r**3)!-(x_dash)/(r*(r**2+epsilon**2)) 
+              grad_p(icell,jcell,i,j,2) = -(y_dash)/(r**3)!-(y_dash)/(r*(r**2+epsilon**2)) 
             else if (r <= 0.5-0.5*delta_r) then 
-              grad_p(icell,jcell,i,j,1) = -(x_dash)/r**3
-              grad_p(icell,jcell,i,j,2) = -(y_dash)/r**3
+              grad_p(icell,jcell,i,j,1) = -(x_dash)/(r*(r**2)+epsilon**2) !-(x_dash)/r**3
+              grad_p(icell,jcell,i,j,2) = -(y_dash)/(r*(r**2)+epsilon**2) !-(y_dash)/r**3
             end if             
           end do
         end do
