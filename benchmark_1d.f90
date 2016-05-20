@@ -16,7 +16,7 @@ program main
 
   call evolve(u, u_eq, x)
 
-  call output_file(x,u, 'endofsim')
+  call output_file(x,u, finaloutput)
 
 end program main
 
@@ -48,13 +48,13 @@ subroutine get_initial_conditions(x,u,size)
 
   select case (ninit)
     case(1)
-      w(1,:) = 1. !exp(-x)
+      w(1,:) = exp(-x)
       w(2,:) = 0
-      w(3,:) = 1. !exp(-x)
+      w(3,:) = exp(-x)
     case(2)
       w(1,:) = exp(-x)
       w(2,:) = 0
-      w(3,:) = exp(-x)!+0.01*exp(-100*(x-0.5)**2)
+      w(3,:) = exp(-x)+eta*exp(-100*(x-boxlen/2.)**2)
     case(3)
       w(1,:) = (1 - ((gamma - 1)/gamma)*1*x)**(1/(gamma-1))
       w(2,:) = 0
@@ -89,7 +89,7 @@ subroutine output_file(x_values, function_values, filen)
      call get_equilibrium_solution([xcell],w_eq,one)
      call compute_primitive(function_values(1:nvar,icell),w,one)
      !write(10,'(7(1PE12.5,1X))')xcell,w(1)
-     write(10,'(7(1PE12.5,1X))')xcell,(w(ivar),ivar=3,nvar)
+     write(10,'(7(1PE12.5,1X))')xcell,(w(ivar)-w_eq(ivar),ivar=3,nvar)
      if (abs(w(3)-w_eq(3))>maximum_error) then
         maximum_error = abs( w(3) - w_eq(3) )
      end if
@@ -138,9 +138,9 @@ subroutine get_equilibrium_solution(x,w, size)
 
   select case (nequilibrium)
     case(1)
-      w(1,:) = 1. !exp(-x)
+      w(1,:) = exp(-x)
       w(2,:) = 0
-      w(3,:) = 1. !exp(-x)
+      w(3,:) = exp(-x)
     case(2)
       w(1,:) = exp(-x)
       w(2,:) = 0

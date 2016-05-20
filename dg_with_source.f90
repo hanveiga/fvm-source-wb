@@ -283,25 +283,25 @@ program dg
 
         call compute_update_exact_delta(delta_u,u_eq, dudt)
         w1=delta_u+0.391752226571890*dt*dudt
-        call limiter_cons(delta_u)
+        !call limiter_cons(delta_u)
 
         call compute_update_exact_delta(w1, u_eq, dudt)
         w2=0.444370493651235*delta_u+0.555629506348765*w1+0.368410593050371*dt*dudt
-        call limiter_cons(w2)
+        !call limiter_cons(w2)
 
         call compute_update_exact_delta(w2,u_eq, dudt)
         w3=0.620101851488403*delta_u+0.379898148511597*w2+0.251891774271694*dt*dudt
-        call limiter_cons(w3)
+        !call limiter_cons(w3)
 
         call compute_update_exact_delta(w3,u_eq, dudt)
         w4=0.178079954393132*delta_u+0.821920045606868*w3+0.544974750228521*dt*dudt
 
         delta_u=0.517231671970585*w2+0.096059710526147*w3+0.063692468666290*dt*dudt
-        call limiter_cons(delta_u)
+        !call limiter_cons(delta_u)
 
         call compute_update_exact_delta(w4,u_eq, dudt)
         delta_u=delta_u+0.386708617503269*w4+0.226007483236906*dt*dudt
-        call limiter_cons(delta_u)
+        !call limiter_cons(delta_u)
      endif
      !u = u+u_eq
 
@@ -351,7 +351,7 @@ program dg
      xcell = (dble(icell)-0.5)*dx + dx/2.0*chsi_quad(1)
      call get_eq_solution([xcell],ww_e,1)
      call compute_primitive(ureal(1:nvar,1,icell),ww,gamma,nvar)
-     write(10,'(7(1PE12.5,1X))')xcell,(ww(ivar),ivar=3,nvar)
+     write(10,'(7(1PE12.5,1X))')xcell,(ww(ivar)-ww_e(ivar),ivar=3,nvar)
   end do
   close(7)
 
@@ -383,8 +383,11 @@ program dg
   close(10)
 
   error = 0.0
+
   write(filename,"(A5,I5.5)")"diffe",99999
-  open(10,file=TRIM(filename)//".dat",form='formatted')
+
+  open(10,status='REPLACE',file="simul/"//TRIM(finaloutput)//".dat",form='formatted')
+  !open(10,file=TRIM(filename)//".dat",form='formatted')
   do icell=1,nx
      !xcell=(dble(icell)-0.5)*dx
      xcell =  (dble(icell)-0.5)*dx + dx/2.0*chsi_quad(1)
@@ -405,7 +408,7 @@ program dg
 !     call compute_primitive(u(1:nvar,1,icell),ww,gamma,nvar)
 !     write(*,'(7(1PE12.5,1X))')xcell,(ww(ivar),ivar=1,nvar)
 !  end do
-  write(*,*) error
+  write(*,*) 'error', error
 end program dg
 !==============================================
 subroutine limiter(u)
@@ -1018,7 +1021,8 @@ subroutine compute_update(u,dudt)
              & ) + source_vol(1:nvar,i,icell)
      end do
   end do
-  !dudt(:,:,:) = 0.
+  dudt(:,:,1) =   dudt(:,:,2)
+  dudt(:,:,nx-1) =   dudt(:,:,nx)
 
 
 end subroutine compute_update
