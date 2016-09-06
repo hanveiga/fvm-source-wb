@@ -1033,7 +1033,7 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
   source_vol(:,:,:,:,:) = 0.0
   select case (source)
   case(1)
-    WRITE(*,*) 'No source'
+    !WRITE(*,*) 'No source'
   case(2) ! sine wave (tend=1 or 10)
     call get_source(u_delta_quad,s,x,y)
     ! evaluate integral
@@ -1079,8 +1079,8 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
       end do
     end do
   end do
-  print*,'max dudt:',maxval(dudt)
-  print*,'min dudt:',minval(dudt)
+  !print*,'max dudt:',maxval(dudt)
+  !print*,'min dudt:',minval(dudt)
   !dudt(4,:,:,:,:) = 0.0 ! block the update on pressure
 
 end subroutine compute_update
