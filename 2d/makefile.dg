@@ -1,0 +1,22 @@
+CF=gfortran
+
+FFLAGS=
+
+OBJS=parameters_dg_2d.o legendre.o limiters.o
+
+exe: $(OBJS) benchmark_2d_dg.f90
+	$(CF) $(FFLAGS) -o dg2d benchmark_2d_dg.f90 $(OBJS)
+
+parameters_dg_2d.o: parameters_dg_2d.f90
+	$(CF) $(FFLAGS) -c $<
+
+legendre.o: legendre.f90
+	$(CF) $(FFLAGS) -c $<
+
+limiters.o: limiters.f90
+	$(CF) $(FFLAGS) -c $<
+
+clean:	
+	rm -f *.f90~ 
+	rm -f *.mod
+	rm dg2d
