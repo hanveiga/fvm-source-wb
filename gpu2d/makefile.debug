@@ -1,0 +1,22 @@
+CF=gfortran
+
+FFLAGS=
+
+OBJS=parameters_dg_2d.o legendre.o commons.o
+
+exe: $(OBJS) test2d.f90
+	$(CF) $(FFLAGS) -o test2d test2d.f90 $(OBJS)
+
+parameters_dg_2d.o: parameters_dg_2d.f90
+	$(CF) $(FFLAGS) -c $<
+
+legendre.o: legendre.f90
+	$(CF) $(FFLAGS) -c $<
+
+commons.o: commons.f90
+	$(CF) $(FFLAGS) -c $<
+
+clean:	
+	rm -f *.f90~ 
+	rm -f *.mod
+	rm test2dd

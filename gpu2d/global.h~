@@ -1,0 +1,30 @@
+//global cpu variables
+int nvar;
+int nx;
+int ny;
+int mx;
+int my;
+double boxlen_x;
+double boxlen_y;
+double dx;
+double cfl;
+double gamma;
+double eta;
+//global gpu variables
+double *u;
+double *du;
+double *w;
+double *u_eq;
+double *w1;
+double *w2;
+double *w3;
+double *w4;
+double *dudt;
+
+double *x;
+double *y;
+
+double *x_quad;
+double *y_quad;
+double *w_x_quad;
+double *w_y_quad;
