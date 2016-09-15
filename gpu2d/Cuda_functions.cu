@@ -30,7 +30,7 @@ __device__  double legendre(double x, int n, int sq){
     break;
   }
   if(sq==1)
-    legendre=sqrt(2.0*double(n)+1.0)*legendre;
+    legendre=sqrt((2.0*double(n)+1.0)/2.0)*legendre;
   return legendre;
 }
 
@@ -60,7 +60,7 @@ __device__  double legendre_prime(double x, int n){
     legendre_prime=1.0/16.0*(1386.0*pow(x,5)-1260.0*pow(x,3)+210.0*x);
     break;
   }
-  legendre_prime=sqrt((double)(2*n+1))*legendre_prime;
+  legendre_prime=sqrt((2.0*double(n)+1.0)/2.0)*legendre_prime;
   return legendre_prime;
 }
 
@@ -73,9 +73,9 @@ __device__  double minmod(double x, double y, double z){
      return 0.0;
 }
 
-__device__  double compute_speed(double rho, double vx, double vy, double e, double gamma){
+__device__  double compute_speed(double rho, double vx, double vy, double p, double gamma){
   double cs, speed;
-  cs=sqrt(gamma*max(e,1E-10)/max(rho,1E-10));
+  cs=sqrt(gamma*max(p,1E-10)/max(rho,1E-10));
   speed=sqrt(vx*vx+vy*vy)+cs;
   return speed;
 }
@@ -83,7 +83,7 @@ __device__  double compute_speed(double rho, double vx, double vy, double e, dou
 __device__ int BC(int index, int size, int bc){
   if (bc == 1){//periodic
     if (index == -1) 
-      index = size;
+      index = size-1;
     else if (index == size)
       index = 0;
   }
@@ -175,40 +175,41 @@ __global__ void compute_primitive(double* u, double* w, double gamma, int size){
   }
 }
 
-__global__ void compute_conservative(double* ww, double* u, double gamma, int size){
+__global__ void compute_conservative(double* w, double* u, double gamma, int size){
 
   int id; 
-  double rho,Vx,Vy;
+  double rho,vx,vy;
   id = blockDim.x * blockIdx.x + threadIdx.x;
   if( id < size ){
-    rho = u[id] = ww[id];
-    Vx  = u[id+size]   = ww[id+size]*rho;
-    Vy  = u[id+size*2] = ww[id+size*2]*rho;
-    u[id+size*3] = ww[id+size*3]/(gamma-1.0) + 0.5*rho*(Vx*Vx+Vy*Vy);
+    rho = u[id] = w[id];
+    vx = w[id+size];
+    vy = w[id+size*2];
+    u[id+size]   = rho*vx;
+    u[id+size*2] = rho*vy;
+    u[id+size*3] = w[id+size*3]/(gamma-1.0) + 0.5*rho*(vx*vx+vy*vy);
   }
 }
 
 __global__ void compute_flux(double* u, double* w, double* flux1, double* flux2, int size){
 
   int id; 
-  double rho,vx,vy,e,Vx,Vy,E;
+  double rhovx,rhovy,e,vx,vy,p;
   id = blockDim.x * blockIdx.x + threadIdx.x;
   if( id < size ){
-    rho = w[id];
     vx  = w[id+size];  
     vy  = w[id+size*2];
-    e   = w[id+size*3];  
-    Vx  = u[id+size];  
-    Vy  = u[id+size*2];
-    E   = u[id+size*3];
-    flux1[id] = rho*vx;
-    flux2[id] = rho*vy;
-    flux1[id+size] = vx*Vx*e;
-    flux2[id+size] = rho*vx*vy;
-    flux1[id+size*2] = rho*vx*vy;
-    flux2[id+size*2] = vy*Vy*e;
-    flux1[id+size*3] = vx*E*vx*e;
-    flux2[id+size*3] = vy*E*vy*e;
+    p   = w[id+size*3];  
+    rhovx = u[id+size];  
+    rhovy = u[id+size*2];
+    e = u[id+size*3];
+    flux1[id] = rhovx;
+    flux2[id] = rhovy;
+    flux1[id+size] = rhovx*vx+p;
+    flux2[id+size] = rhovx*vy;
+    flux1[id+size*2] = rhovx*vy;
+    flux2[id+size*2] = rhovy*vy+p;
+    flux1[id+size*3] = vx*(e+p);
+    flux2[id+size*3] = vy*(e+p);
   }
 }
 
@@ -292,7 +293,7 @@ __global__ void compute_max_speed(double* w, double* maxvalues, double gamma, in
 
 __global__ void compute_AT(double* ul, double* ur, double* ub, double* ut,  double* delta_u, 
 			   double* xquad, double* yquad, int my, int mx, int ny, int nx, int nvar){
-  int id, var, icell, jcell, imod, jmod, yq, xq, idq, udid;
+  int id, var, icell, jcell, imod, jmod, yq, xq, idq, xid, yid;
   double shudl[5],shudr[5],shudb[5],shudt[5];
   double chsi_m = -1, chsi_p = 1;
   int a = my;
@@ -305,9 +306,13 @@ __global__ void compute_AT(double* ul, double* ur, double* ub, double* ut,  doub
   icell = jcell/ny;
   jcell -= icell*ny;
   idq = jcell*b + icell*c + var*d;
-  udid = jcell*my + icell*my*ny + var*my*ny*nx;
-
+  yid = jcell*my + icell*my*ny + var*my*ny*nx;
+  xid = jcell*mx + icell*mx*ny + var*mx*ny*nx;
   if( id < nx*ny*nvar ){
+    for (xq=0;xq<mx;xq++)
+      shudb[xq] = shudt[xq] = 0;
+    for (yq=0;yq<my;yq++)
+      shudl[yq] = shudr[yq] = 0;
     for (imod=0;imod<mx;imod++){ //This is implemented considering only one block in the reduction launch.
       for (jmod=0;jmod<my;jmod++){
 	for (yq=0;yq<my;yq++){
@@ -321,12 +326,12 @@ __global__ void compute_AT(double* ul, double* ur, double* ub, double* ut,  doub
       }
     }
     for (yq=0;yq<my;yq++){
-      ul[yq+udid]=shudl[yq];
-      ur[yq+udid]=shudr[yq];
+      ul[yq+yid]=shudl[yq];
+      ur[yq+yid]=shudr[yq];
     }
     for (xq=0;xq<mx;xq++){
-      ub[xq+udid]=shudb[xq];
-      ut[xq+udid]=shudt[xq];
+      ub[xq+xid]=shudb[xq];
+      ut[xq+xid]=shudt[xq];
     }
   }
 }
@@ -345,17 +350,17 @@ __global__ void compute_FG(double* um, double* up, double* wm, double* wp, doubl
     wid = mod + jcell*my;
     b = nx*ny*my;
     a = ny*my;
-    fsize = nx+1;
+    fsize = nx;
   }
   else if(dim == 0){
-    icell = id/(my*(ny+1));
-    mod = id-icell*my*(ny+1);
-    face = mod/my;
-    mod -= face*my;
-    wid = mod + icell*my*ny;
-    b = nx*ny*my;
-    a = my;
-    fsize = ny+1;
+    icell = id/(mx*(ny+1));
+    mod = id-icell*mx*(ny+1);
+    face = mod/mx;
+    mod -= face*mx;
+    wid = mod + icell*mx*ny;
+    b = nx*ny*mx;
+    a = mx;
+    fsize = ny;
   }
   if(id < size){
     im = face-1;
@@ -368,18 +373,20 @@ __global__ void compute_FG(double* um, double* up, double* wm, double* wp, doubl
     speed_m = compute_speed(wm[mid],wm[mid+b],wm[mid+b*2],wm[mid+b*3],gamma);
     cmax=max(speed_m,speed_p);
     for(var = 0; var < nvar; var++)
-      FG[id+size*var]=0.5*(fp[pid+b*var]+fm[mid+b*var])+0.5*cmax*(um[mid+b*var]-up[pid+b*var]);
+      FG[id+size*var]=0.5*(fp[pid+b*var]+fm[mid+b*var])+0.5*cmax*(up[pid+b*var]-um[mid+b*var]);
   }
 }
-__global__ void integrate_flux(){
+__global__ void flux_line_integral(double* edge,double* F,double* G,double* xquad,double* yquad,
+				   double* w_x_quad,double* w_y_quad, int my,int mx,int ny,int nx,int nvar){
   int id, icell, jcell, imod, jmod, var;
-  int xq, yq, idq;
+  int xq, yq, idF, idG;
   int a = my;
   int b = mx*a;
   int c = ny*b;
   int d = nx*c;
   int size = nvar*d;
   double val1,val2;
+  double chsi_m = -1, chsi_p = 1;
   val1=val2=0.0;
   id = blockDim.x * blockIdx.x + threadIdx.x;
   var = id/d;
@@ -390,25 +397,33 @@ __global__ void integrate_flux(){
   jmod -= jcell*b;
   imod = jmod/a;
   jmod -= imod*a;
-  idq = jcell*b + icell*c + var*d;
-  idF = jcell*mx + nvar*mx*ny*(nx+1);
-  idG = icell*my*(ny+1) + nvar*my*nx*(ny+1);
+  idF = jcell*my + var*my*ny*(nx+1);
+  idG = icell*mx*(ny+1) + var*mx*nx*(ny+1);
   if( id < size){
-    edge[id] = 0;
-    edge[id+size] = 0;
-    edge[id+size*2] = 0;
-    edge[id+size*3] = 0;
-    for(xq = 0; xq < mx; xq++){
-      edge[id]      += 0.5*F[xq+(icell+1)*mx*ny+idF]*legendre(chsi_m,imod)*legendre(x_quad[xquad],jmod)*w_x_quad[xq];
-      edge[id+size] += 0.5*F[xq+icell*mx*ny+idF]*legendre(chsi_m,imod)*legendre(x_quad[xquad],jmod)*w_x_quad[xq];
-    }
     for(yq = 0; yq < my; yq++){
-      edge[id+size*2]      += 0.5*G[yq+(jcell+1)*my+idG]*legendre(chsi_p,jmod)*legendre(x_quad[xquad],jmod)*w_x_quad[xq];
-      edge[id+size*3] += 0.5*G[yq+jcell*my+idG]*legendre(chsi_p,jmod)*legendre(x_quad[xquad],jmod)*w_x_quad[xq];
+      val1 += 0.5*F[yq+(icell+1)*my*ny+idF]*legendre(chsi_p,imod,1)*legendre(yquad[yq],jmod,1)*w_y_quad[yq];
+      val2 += 0.5*F[yq+icell*my*ny+idF]*legendre(chsi_m,imod,1)*legendre(yquad[yq],jmod,1)*w_y_quad[yq];
     }
+    edge[id] = val1;
+    edge[id+size] = val2;
+    val1 = val2 =0;
+    for(xq = 0; xq < mx; xq++){
+      val1 += 0.5*G[xq+(jcell+1)*mx+idG]*legendre(chsi_p,jmod,1)*legendre(xquad[xq],imod,1)*w_x_quad[xq];
+      val2 += 0.5*G[xq+jcell*mx+idG]*legendre(chsi_m,jmod,1)*legendre(xquad[xq],imod,1)*w_x_quad[xq];
+    }
+    edge[id+size*2] = val1;
+    edge[id+size*3] = val2;
   }
 }
 
+__global__ void compute_dudt(double* dudt, double* flux_vol1, double* flux_vol2, double* edge, double oneoverdx, double oneoverdy, int size){
+  int id;
+  id = blockDim.x * blockIdx.x + threadIdx.x;
+  if( id < size ){
+    dudt[id] = 2*( oneoverdx*flux_vol1[id] + oneoverdy*flux_vol2[id] - oneoverdx*(edge[id]-edge[id+size]) - oneoverdy*(edge[id+size*2]-edge[id+size*3]));//+source_vol[id] 
+    //dudt[id] = edge[id];
+  }
+}
 
 __global__ void sum3 (double* out, double* A, double* B, double* C, double alpha, double beta, double gamma, int size)
 {  
@@ -444,9 +459,11 @@ extern "C" void device_get_modes_from_nodes_(double** nodes, double** modes){
   }
 }
 
-extern "C" void device_get_nodes_from_modes_(double** m, double** n){
+extern "C" void device_get_nodes_from_modes_(double** modes, double** nodes){
+  int size = nx*ny*mx*my*nvar;
   cudaError_t error = cudaGetLastError();
   error = cudaGetLastError();
+  get_nodes_from_modes<<<(size+BLOCK-1)/BLOCK,BLOCK>>>(*modes,*nodes,x_quad,y_quad,nx,ny,mx,my,nvar);
   if(error != cudaSuccess){
     printf("CUDA error get_nodes_from_modes: %s\n", cudaGetErrorString(error));
     exit(-1);
@@ -457,10 +474,9 @@ extern "C" void device_compute_max_speed_ (double* csmax, double* vxmax, double*
   double max[4];
   cudaError_t error = cudaGetLastError();
   int size = nx*ny*mx*my;
-  printf("size %d\n",size);
   compute_primitive<<<(size+BLOCK-1)/BLOCK,BLOCK>>>( u, w, gmma, size);
   compute_max_speed<<<1,BLOCK>>>( w, maxvalues, gmma, size);
-  
+  error = cudaGetLastError();
   if(error != cudaSuccess){
     printf("CUDA error compute max speed: %s\n", cudaGetErrorString(error));
     exit(-1);
@@ -472,20 +488,67 @@ extern "C" void device_compute_max_speed_ (double* csmax, double* vxmax, double*
   *csmax = max[3];
  }
 
-extern "C" void device_compute_update_(){
-
-  get_nodes_from_modes<<<(nx*ny*mx*my*nvar+BLOCK-1)/BLOCK,BLOCK>>>(du,u_d_q,x_quad,y_quad,nx,ny,mx,my,nvar);
-  compute_flux<<<(nx*ny*mx*my+BLOCK-1)/BLOCK,BLOCK>>>(u_d_q, du, flux_q1, flux_q2, nx*my*mx*my);
-  flux_vol<<<(nx*ny*mx*my*nvar+BLOCK-1)/BLOCK,BLOCK>>>(flux_v1,flux_v2,flux_q1,flux_q2,w_x_quad,w_y_quad,x_quad,y_quad,nx,ny,mx,my,nvar);
+extern "C" void device_compute_update_(int* Iter, double* DT){
+  double dt = *DT;
+  int iter = *Iter;
+  switch (iter){
+  case 0:
+    modes = du;
+    break;
+  case 1:
+    modes = w1;
+    break;
+  case 2:
+    modes = w2;
+    break;
+  case 3:
+    modes = w3;
+    break;
+  case 4:
+    modes = w4;
+    break;
+  }
+  cudaError_t error = cudaGetLastError();
+  get_nodes_from_modes<<<(tsize+BLOCK-1)/BLOCK,BLOCK>>>(modes,u_d_q,x_quad,y_quad,nx,ny,mx,my,nvar);
+  compute_primitive<<<(usize+BLOCK-1)/BLOCK,BLOCK>>>( u_d_q, w, gmma, usize);
+  compute_flux<<<(usize+BLOCK-1)/BLOCK,BLOCK>>>(u_d_q, w, flux_q1, flux_q2, usize);
+  flux_vol<<<(tsize+BLOCK-1)/BLOCK,BLOCK>>>(flux_v1,flux_v2,flux_q1,flux_q2,w_x_quad,w_y_quad,x_quad,y_quad,nx,ny,mx,my,nvar);
   compute_AT<<<(nx*ny*nvar+BLOCK-1)/BLOCK,BLOCK>>>(ul,ur,ub,ut,du,x_quad,y_quad,my,mx,ny,nx,nvar);
   compute_primitive<<<(my*ny*nx+BLOCK-1)/BLOCK,BLOCK>>>( ul, wl, gmma, my*ny*nx);
   compute_primitive<<<(my*ny*nx+BLOCK-1)/BLOCK,BLOCK>>>( ur, wr, gmma, my*ny*nx);
   compute_primitive<<<(mx*ny*nx+BLOCK-1)/BLOCK,BLOCK>>>( ub, wb, gmma, mx*ny*nx);
   compute_primitive<<<(mx*ny*nx+BLOCK-1)/BLOCK,BLOCK>>>( ut, wt, gmma, mx*ny*nx);
-  compute_flux<<<(nx*ny*my+BLOCK-1)/BLOCK,BLOCK>>>(ul, wl, fl1, fl2, nx*my*mx*my);
-  compute_flux<<<(nx*ny*my+BLOCK-1)/BLOCK,BLOCK>>>(ur, wr, fr1, fr2, nx*my*mx*my);
-  compute_flux<<<(nx*ny*mx+BLOCK-1)/BLOCK,BLOCK>>>(ub, wb, fb1, fb2, nx*my*mx*my);
-  compute_flux<<<(nx*ny*mx+BLOCK-1)/BLOCK,BLOCK>>>(ut, wt, ft1, ft2, nx*my*mx*my);
+  compute_flux<<<(nx*ny*my+BLOCK-1)/BLOCK,BLOCK>>>(ul, wl, fl1, fl2, nx*ny*my);
+  compute_flux<<<(nx*ny*my+BLOCK-1)/BLOCK,BLOCK>>>(ur, wr, fr1, fr2, nx*ny*my);
+  compute_flux<<<(nx*ny*mx+BLOCK-1)/BLOCK,BLOCK>>>(ub, wb, fb1, fb2, nx*ny*mx);
+  compute_flux<<<(nx*ny*mx+BLOCK-1)/BLOCK,BLOCK>>>(ut, wt, ft1, ft2, nx*ny*mx);
+  compute_FG<<<(my*ny*(nx+1)*nvar+BLOCK-1)/BLOCK,BLOCK>>>(ul,ur,wl,wr,fl1,fr1,F,gmma,my,mx,ny,nx,nvar,1,1,my*ny*(nx+1));
+  compute_FG<<<(mx*(ny+1)*nx*nvar+BLOCK-1)/BLOCK,BLOCK>>>(ub,ut,wb,wt,fb2,ft2,G,gmma,my,mx,ny,nx,nvar,0,1,mx*(ny+1)*nx);
+  flux_line_integral<<<(tsize+BLOCK-1)/BLOCK,BLOCK>>>(edge,F,G,x_quad,y_quad,w_x_quad,w_y_quad,my,mx,ny,nx,nvar);
+  compute_dudt<<<(tsize+BLOCK-1)/BLOCK,BLOCK>>>(dudt,flux_v1,flux_v2,edge,invdx,invdy,nx*ny*mx*my*nvar);
+  switch (iter){
+  case 0:
+    sum2<<<(tsize+BLOCK-1)/BLOCK,BLOCK>>>(w1,du,dudt,0.391752226571890*dt, tsize);
+  break;
+  case 1:
+    sum3<<<(tsize+BLOCK-1)/BLOCK,BLOCK>>>(w2,du,w1,dudt,0.444370493651235,0.555629506348765,0.368410593050371*dt, tsize);
+    break;
+  case 2:
+    sum3<<<(tsize+BLOCK-1)/BLOCK,BLOCK>>>(w3,du,w2,dudt,0.620101851488403,0.379898148511597,0.251891774271694*dt, tsize);
+    break;
+  case 3:
+    sum3<<<(tsize+BLOCK-1)/BLOCK,BLOCK>>>(w4,du,w3,dudt,0.178079954393132,0.821920045606868,0.544974750228521*dt, tsize);
+    sum3<<<(tsize+BLOCK-1)/BLOCK,BLOCK>>>(du,w2,w3,dudt,0.517231671970585,0.096059710526147,0.063692468666290*dt, tsize);
+    break;
+  case 4:
+    plus_equal<<<(tsize+BLOCK-1)/BLOCK,BLOCK>>>(du,w4,dudt,0.386708617503269,0.226007483236906*dt, tsize);
+    break;
+  }
+  error = cudaGetLastError();
+  if(error != cudaSuccess){
+    printf("CUDA error compute update: %s\n", cudaGetErrorString(error));
+    exit(-1);
+  }
 }
 
 extern "C" void device_sum3_ (double** out,  double**  A, double** B, double** C, double* alpha, double* beta, double* gamma, int* n){
@@ -528,26 +591,29 @@ extern "C" void gpu_allocation_ (int *Nvar, int* Nx, int* Ny, int* Mx, int* My, 
   ny = *Ny;
   mx = *Mx;
   my = *My;
+  tsize = mx*my*nx*ny*nvar;
+  usize = mx*my*nx*ny;
   boxlen_x = *Bl_x;
   boxlen_y = *Bl_y;
   dx = boxlen_x/double(nx);
   dy = boxlen_y/double(ny);
   invdx = 1/dx;
   invdy = 1/dy;
+  //printf("dx %.14g dy %.14g invdx %.14g invdy %.14g\n",dx,dy,invdx,invdy);
   cfl = *CFL;
   gmma = *Gamma;
   eta = *Eta;
   cudaError_t error = cudaGetLastError();
-  cudaMalloc ( &u, nvar*nx*ny*mx*my * sizeof(double));
-  cudaMalloc ( &u_eq, nvar*nx*ny*mx*my * sizeof(double));
-  cudaMalloc ( &u_d_q, nvar*nx*ny*mx*my * sizeof(double));
-  cudaMalloc ( &du, nvar*nx*ny*mx*my * sizeof(double));
-  cudaMalloc ( &w, nvar*nx*ny*mx*my * sizeof(double));
-  cudaMalloc ( &w1, nvar*nx*ny*mx*my * sizeof(double));
-  cudaMalloc ( &w2, nvar*nx*ny*mx*my * sizeof(double));
-  cudaMalloc ( &w3, nvar*nx*ny*mx*my * sizeof(double));
-  cudaMalloc ( &w4, nvar*nx*ny*mx*my * sizeof(double));
-  cudaMalloc ( &dudt, nvar*nx*ny*mx*my * sizeof(double));
+  cudaMalloc ( &u, tsize * sizeof(double));
+  cudaMalloc ( &u_eq, tsize * sizeof(double));
+  cudaMalloc ( &u_d_q, tsize * sizeof(double));
+  cudaMalloc ( &du, tsize * sizeof(double));
+  cudaMalloc ( &w, tsize * sizeof(double));
+  cudaMalloc ( &w1, tsize * sizeof(double));
+  cudaMalloc ( &w2, tsize * sizeof(double));
+  cudaMalloc ( &w3, tsize * sizeof(double));
+  cudaMalloc ( &w4, tsize * sizeof(double));
+  cudaMalloc ( &dudt, tsize * sizeof(double));
   cudaMalloc ( &ul, nvar*nx*ny*my * sizeof(double)); 
   cudaMalloc ( &ur, nvar*nx*ny*my * sizeof(double)); 
   cudaMalloc ( &ut, nvar*nx*ny*mx * sizeof(double)); 
@@ -556,6 +622,10 @@ extern "C" void gpu_allocation_ (int *Nvar, int* Nx, int* Ny, int* Mx, int* My, 
   cudaMalloc ( &wr, nvar*nx*ny*my * sizeof(double)); 
   cudaMalloc ( &wt, nvar*nx*ny*mx * sizeof(double)); 
   cudaMalloc ( &wb, nvar*nx*ny*mx * sizeof(double));
+  cudaMalloc ( &flux_q1, tsize * sizeof(double)); 
+  cudaMalloc ( &flux_q2, tsize * sizeof(double)); 
+  cudaMalloc ( &flux_v1, tsize * sizeof(double)); 
+  cudaMalloc ( &flux_v2, tsize * sizeof(double)); 
   cudaMalloc ( &fl1, nvar*nx*ny*my * sizeof(double)); 
   cudaMalloc ( &fr1, nvar*nx*ny*my * sizeof(double)); 
   cudaMalloc ( &ft1, nvar*nx*ny*mx * sizeof(double)); 
@@ -564,10 +634,12 @@ extern "C" void gpu_allocation_ (int *Nvar, int* Nx, int* Ny, int* Mx, int* My, 
   cudaMalloc ( &fr2, nvar*nx*ny*my * sizeof(double)); 
   cudaMalloc ( &ft2, nvar*nx*ny*mx * sizeof(double)); 
   cudaMalloc ( &fb2, nvar*nx*ny*mx * sizeof(double)); 
-  cudaMalloc ( &x, nx*ny*mx*my * sizeof(double));
-  cudaMalloc ( &y, nx*ny*mx*my * sizeof(double));
   cudaMalloc ( &F, nvar*(nx+1)*ny*my * sizeof(double)); 
   cudaMalloc ( &G, nvar*nx*(ny+1)*mx * sizeof(double)); 
+  cudaMalloc ( &edge, tsize*4 * sizeof(double));
+  
+  cudaMalloc ( &x, nx*ny*mx*my * sizeof(double));
+  cudaMalloc ( &y, nx*ny*mx*my * sizeof(double));
   cudaMalloc ( &x_quad, mx * sizeof(double));
   cudaMalloc ( &y_quad, my * sizeof(double));
   cudaMalloc ( &w_x_quad, mx * sizeof(double));
@@ -582,12 +654,13 @@ extern "C" void gpu_allocation_ (int *Nvar, int* Nx, int* Ny, int* Mx, int* My, 
   }
 }
 
-extern "C" void gpu_set_pointers_ (double** u_d, double** du_d, double** w_d, double** u_eq_d,
+extern "C" void gpu_set_pointers_ (double** u_d, double** du_d, double** dudt_d, double** w_d, double** u_eq_d,
 			       double** x_d, double** y_d ,double** x_quad_d,
 			       double** y_quad_d, double** w_x_quad_d,
 			       double** w_y_quad_d) {
    *u_d = u;
    *du_d =du;
+   *dudt_d =dudt;
    *w_d = w;
    *u_eq_d = u_eq;
    *x_d = x;

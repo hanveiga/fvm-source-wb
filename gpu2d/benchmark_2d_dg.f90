@@ -9,7 +9,7 @@ program main
   real(kind=8),dimension(1:my,1:mx,1:ny,1:nx,1:nvar)::u, w, u_eq
   
   !device pointers
-  type (c_ptr) :: u_d, du_d, w_d, u_eq_d 
+  type (c_ptr) :: u_d, du_d,dudt_d, w_d, u_eq_d 
   type (c_ptr) :: x_d, y_d, x_quad_d, y_quad_d
   type (c_ptr) :: w_x_quad_d,w_y_quad_d
   
@@ -24,7 +24,7 @@ program main
   call devices()
   call setdevice(0)
   call gpu_allocation(nvar,nx,ny,mx,my,boxlen_x,boxlen_y,cfl,eta,gamma)
-  call gpu_set_pointers(u_d,du_d,w_d,u_eq_d,x_d,y_d &
+  call gpu_set_pointers(u_d,du_d,dudt_d,w_d,u_eq_d,x_d,y_d &
             & ,x_quad_d,y_quad_d,w_x_quad_d,w_y_quad_d)
   call h2d(u,u_d,nvar*nx*ny*mx*my)
   call h2d(w,w_d,nvar*nx*ny*mx*my)
@@ -35,7 +35,7 @@ program main
   call h2d(y_quad,y_quad_d,my)
   call h2d(w_x_quad,w_x_quad_d,mx)
   call h2d(w_y_quad,w_y_quad_d,my)
-  call evolve(u, x, y, u_eq, u_d, du_d)
+  call evolve(u, x, y, u_eq, u_d, du_d, dudt_d)
 
   call output_file(x, y ,u,1,'fintwo')
 
@@ -327,7 +327,7 @@ subroutine get_initial_conditions(x,y,u,size_x,size_y, order_x, order_y)
   end select
 
   call compute_conservative(w,u,nx,ny,mx,my)
-  !u = w
+  
 end subroutine get_initial_conditions
 
 subroutine output_file(x_values, y_values, function_values, var, filen)
@@ -482,12 +482,12 @@ subroutine get_equilibrium_solution(x,y,w, size_x,size_y, order_x, order_y)
 
 end subroutine get_equilibrium_solution
 
-subroutine evolve(u, x,y, u_eq, u_d, du_d)
+subroutine evolve(u, x,y, u_eq, u_d, du_d, dudt_d)
   ! eat real nodal values, spit out nodal values
   USE ISO_C_BINDING
   use parameters_dg_2d
   implicit none
-  type (c_ptr) :: u_d, du_d
+  type (c_ptr) :: u_d, du_d, dudt_d
   real(kind=8),dimension(1:my,1:mx,1:ny,1:nx,1:nvar)::u,u_eq
   real(kind=8),dimension(1:my,1:mx,1:ny,1:nx)::x,y
   ! internal variables
@@ -505,6 +505,7 @@ subroutine evolve(u, x,y, u_eq, u_d, du_d)
   !call get_modes_from_nodes(u,delta_u, nx, ny, mx, my)
   !call get_nodes_from_modes(delta_u,u, nx, ny, mx, my)
   call device_get_modes_from_nodes(u_d,du_d)
+  !call device_get_nodes_from_modes(du_d,u_d)
   call d2h(du_d,delta_u,nvar*nx*ny*mx*my)
  
   t=0
@@ -514,7 +515,6 @@ subroutine evolve(u, x,y, u_eq, u_d, du_d)
  
   do while(t < tend)
     ! Compute time step
-    !call compute_max_speed(u,cs_max,v_xmax,v_ymax,cmax)
     call device_compute_max_speed(cs_max,v_xmax,v_ymax,cmax)
     !write(*,*) 'cmax=',cmax
     write(*,*) 'csmax, umax,vmax= ', cs_max, v_xmax, v_ymax
@@ -532,23 +532,16 @@ subroutine evolve(u, x,y, u_eq, u_d, du_d)
 
     if(solver=='RK4')then !4th order SSP RGKT
       !call compute_update(delta_u,x,y,u_eq,dudt)
-      call device_compute_update()
-      pause
-      w1=delta_u+0.391752226571890*dt*dudt
-      call apply_limiter(w1)
-      call compute_update(w1,x,y,u_eq,dudt)
-      w2=0.444370493651235*delta_u+0.555629506348765*w1+0.368410593050371*dt*dudt
-      call apply_limiter(w2)
-      call compute_update(w2,x,y,u_eq,dudt)
-      w3=0.620101851488403*delta_u+0.379898148511597*w2+0.251891774271694*dt*dudt
-      call apply_limiter(w3)
-      call compute_update(w3,x,y,u_eq,dudt)
-      w4=0.178079954393132*delta_u+0.821920045606868*w3+0.544974750228521*dt*dudt
-      call apply_limiter(w4)
-      delta_u=0.517231671970585*w2+0.096059710526147*w3+0.063692468666290*dt*dudt
-      call compute_update(w4,x,y,u_eq,dudt)
-      delta_u=delta_u+0.386708617503269*w4+0.226007483236906*dt*dudt
-      call apply_limiter(delta_u)
+      call device_compute_update(0,dt)
+      !call apply_limiter(w1)
+      call device_compute_update(1,dt)
+      !call apply_limiter(w2)
+      call device_compute_update(2,dt)
+      !call apply_limiter(w3)
+      call device_compute_update(3,dt)
+      !call apply_limiter(w4)
+      call device_compute_update(4,dt)
+      !call apply_limiter(delta_u)
     endif
 
     if(solver=='DEB')then
@@ -564,12 +557,11 @@ subroutine evolve(u, x,y, u_eq, u_d, du_d)
     t=t+dt
     iter=iter+1
     write(*,*)'time=',iter,t,dt, cmax
-
-    call get_nodes_from_modes(delta_u, nodes, nx, ny, mx, my)
-
+    call device_get_nodes_from_modes(du_d,u_d)
     if ((make_movie).and.(MODULO(iter,interval)==0)) then
       var = 1
       snap_counter = snap_counter + 1
+      call d2h(u_d,nodes,nvar*nx*ny*mx*my)
       write(filename,'(a, i5.5)') 'SIM', snap_counter
       call output_file(x,y, nodes,var,filename)
 
@@ -577,7 +569,7 @@ subroutine evolve(u, x,y, u_eq, u_d, du_d)
 
 
   end do
-
+  call d2h(du_d,delta_u,nvar*nx*ny*mx*my)
   call get_nodes_from_modes(delta_u, nodes, nx, ny, mx, my)
   u = nodes
 end subroutine evolve
