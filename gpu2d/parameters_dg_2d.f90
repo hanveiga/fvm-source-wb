@@ -4,6 +4,7 @@ module parameters_dg_2d
   integer,parameter::ny=30
   integer,parameter::mx=2
   integer,parameter::my=2
+  integer,parameter::mods = max(mx,my)
 
   integer,parameter::nvar=4
   integer,parameter::riemann=2
@@ -27,7 +28,8 @@ module parameters_dg_2d
 
   ! misc commons
   real(kind=8),dimension(1:mx)::x_quad, w_x_quad
-  real(kind=8),dimension(1:mx)::y_quad, w_y_quad
+  real(kind=8),dimension(1:my)::y_quad, w_y_quad
+  real(kind=8),dimension(1:mods)::sqrt_mod
   real(kind=8)::M=0
   integer,parameter::interval = 50
 end module parameters_dg_2d

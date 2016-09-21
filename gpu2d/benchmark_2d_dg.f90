@@ -10,9 +10,8 @@ program main
   
   !device pointers
   type (c_ptr) :: u_d, du_d,dudt_d, w_d, u_eq_d 
-  type (c_ptr) :: x_d, y_d, x_quad_d, y_quad_d
-  type (c_ptr) :: w_x_quad_d,w_y_quad_d
-  
+  type (c_ptr) :: x_d, y_d
+   
   call get_coords(x,y,nx,ny, mx, my)
 
   call get_initial_conditions(x,y,u,nx,ny, mx, my)
@@ -25,16 +24,13 @@ program main
   call setdevice(0)
   call gpu_allocation(nvar,nx,ny,mx,my,boxlen_x,boxlen_y,cfl,eta,gamma)
   call gpu_set_pointers(u_d,du_d,dudt_d,w_d,u_eq_d,x_d,y_d &
-            & ,x_quad_d,y_quad_d,w_x_quad_d,w_y_quad_d)
+            & ,x_quad,y_quad,w_x_quad,w_y_quad,sqrt_mod)
   call h2d(u,u_d,nvar*nx*ny*mx*my)
   call h2d(w,w_d,nvar*nx*ny*mx*my)
   call h2d(u_eq,u_eq_d,nvar*nx*ny*mx*my)
   call h2d(x,x_d,nx*ny*mx*my)
   call h2d(y,y_d,nx*ny*mx*my)
-  call h2d(x_quad,x_quad_d,mx)
-  call h2d(y_quad,y_quad_d,my)
-  call h2d(w_x_quad,w_x_quad_d,mx)
-  call h2d(w_y_quad,w_y_quad_d,my)
+  
   call evolve(u, x, y, u_eq, u_d, du_d, dudt_d)
 
   call output_file(x, y ,u,1,'fintwo')
@@ -55,7 +51,9 @@ subroutine get_coords(x,y,size_x,size_y, order_x, order_y)
   ! get quadrature
   call gl_quadrature(x_quad,w_x_quad,order_x)
   call gl_quadrature(y_quad,w_y_quad,order_y)
-
+  do i=1,mods
+    sqrt_mod(i)=sqrt((2.0*dble(i-1)+1.0))/sqrt(2.)
+  end do  
   dx = boxlen_x/dble(size_x)
   dy = boxlen_y/dble(size_y)
   do i=1,size_x
@@ -87,8 +85,8 @@ subroutine get_initial_conditions(x,y,u,size_x,size_y, order_x, order_y)
   select case (ninit)
   case(1) !Linear advection of pulse
     w(:,:,:,:,1) = exp(-((x(:,:,:,:)-boxlen_x/2.)**2+(y(:,:,:,:)-boxlen_y/2.)**2)*20)
-    w(:,:,:,:,2) = 1.0
-    w(:,:,:,:,3) = 1.0
+    w(:,:,:,:,2) = 10.0
+    w(:,:,:,:,3) = 10.0
     w(:,:,:,:,4) = minval(w(:,:,:,:,1))
   case(2) !hydrostatic equilibrium with a pulse on pressure
     rho_0 = 1.21
@@ -325,7 +323,6 @@ subroutine get_initial_conditions(x,y,u,size_x,size_y, order_x, order_y)
     w(:,:,:,:,3) = 0.
     w(:,:,:,:,4) = p_0*exp(-(rho_0*g/p_0)*(x+y))
   end select
-
   call compute_conservative(w,u,nx,ny,mx,my)
   
 end subroutine get_initial_conditions
@@ -504,9 +501,14 @@ subroutine evolve(u, x,y, u_eq, u_d, du_d, dudt_d)
   delta_u(:,:,:,:,:) = 0.0
   !call get_modes_from_nodes(u,delta_u, nx, ny, mx, my)
   !call get_nodes_from_modes(delta_u,u, nx, ny, mx, my)
+  !do i=1,1000
   call device_get_modes_from_nodes(u_d,du_d)
   !call device_get_nodes_from_modes(du_d,u_d)
-  call d2h(du_d,delta_u,nvar*nx*ny*mx*my)
+  !end do
+  !call d2h(du_d,u,14400)
+  !open(unit=8,file='dudt.dat',form='UNFORMATTED',access='direct',recl=14400*8)
+  !write(8,rec=1)u
+  !stop
  
   t=0
   iter=0
@@ -519,6 +521,7 @@ subroutine evolve(u, x,y, u_eq, u_d, du_d, dudt_d)
     !write(*,*) 'cmax=',cmax
     write(*,*) 'csmax, umax,vmax= ', cs_max, v_xmax, v_ymax
     dt = (cfl/dble(2*4+1))/((abs(v_xmax)+(cs_max))/dx + (abs(v_ymax)+(cs_max))/dx)
+    
     if(solver=='EQL')then
 
       call compute_update(delta_u,x,y,u_eq, dudt)
@@ -542,6 +545,11 @@ subroutine evolve(u, x,y, u_eq, u_d, du_d, dudt_d)
       !call apply_limiter(w4)
       call device_compute_update(4,dt)
       !call apply_limiter(delta_u)
+      call d2h(dudt_d,dudt,14400)
+      !open(unit=8,file='dudt.dat',form='UNFORMATTED',access='direct',recl=14400*8)
+      !write(8,rec=1)dudt
+      !write(*,*) "Here"
+      !stop
     endif
 
     if(solver=='DEB')then
@@ -557,6 +565,9 @@ subroutine evolve(u, x,y, u_eq, u_d, du_d, dudt_d)
     t=t+dt
     iter=iter+1
     write(*,*)'time=',iter,t,dt, cmax
+    if(abs(cs_max) > 1.5)then
+     pause
+    endif
     call device_get_nodes_from_modes(du_d,u_d)
     if ((make_movie).and.(MODULO(iter,interval)==0)) then
       var = 1
