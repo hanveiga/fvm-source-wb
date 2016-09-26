@@ -11,7 +11,7 @@ program main
 
   call get_initial_conditions(x,y,u,nx,ny, mx, my)
   call output_file(x, y ,u,1,'initcond')
-
+  !STOP
   call get_equilibrium_solution(x, y, u_eq, nx, ny, mx, my)
 
   call evolve(u, x, y,u_eq)
@@ -19,6 +19,22 @@ program main
   call output_file(x, y ,u,1,'fintwo')
 
 end program main
+
+subroutine compute_error(u,x,y,t,u_anal)
+  use parameters_dg_2d
+  implicit none
+  real(kind=8),dimension(1:nx,1:ny,1:mx,1:my)::x,y
+  real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::u, u_init, u_anal
+  real(kind=8)::t
+
+  call get_initial_conditions(x,y,u_init,nx,ny,mx,my)
+
+  u_anal(:,:,:,:,:) = 0.0
+  u_anal(1,:,:,:,:) = u_init(1,:,:,:,:)*exp(1*t)
+  print*,'maxerror',maxval(abs(u-u_anal))
+
+end subroutine compute_error
+
 
 !---------
 subroutine get_coords(x,y,size_x,size_y, order_x, order_y)
@@ -260,8 +276,8 @@ subroutine get_initial_conditions(x,y,u,size_x,size_y, order_x, order_y)
               w(1,i,j,inti,intj) = rho_0
             end if
 
-            w(2,i,j,inti,intj) = 1.0 !1.0
-            w(3,i,j,inti,intj) = 1.0 !1.0
+            w(2,i,j,inti,intj) = 0.0 !1.0 !1.0
+            w(3,i,j,inti,intj) = 1.0 !0.0!1.0 !1.0
 
             w(4,i,j,inti,intj)  = p_0
           end do
@@ -284,13 +300,13 @@ subroutine get_initial_conditions(x,y,u,size_x,size_y, order_x, order_y)
             x_dash = x(i,j,inti,intj) - x_center
             y_dash = y(i,j,inti,intj) - y_center
 
-            if ((abs(x_dash)<=0.25)) then
+            if ((abs(y_dash)<=0.25)) then
               w(1,i,j,inti,intj) = rho_d
             else
               w(1,i,j,inti,intj) = rho_0
             end if
 
-            w(2,i,j,inti,intj) = 0.
+            w(2,i,j,inti,intj) = 0.0
             w(3,i,j,inti,intj) = 1.0
 
           end do
@@ -301,11 +317,63 @@ subroutine get_initial_conditions(x,y,u,size_x,size_y, order_x, order_y)
     rho_0 = 1.21
     p_0 = 1
     g = 1
-    w(1,:,:,:,:) = rho_0*exp(-(rho_0*g/p_0)*(x(:,:,:,:)+y(:,:,:,:)))
-    w(2,:,:,:,:) = 0.
-    w(3,:,:,:,:) = 0.
-    w(4,:,:,:,:) = p_0*exp(-(rho_0*g/p_0)*(x+y))
-  end select
+    w(1,:,:,:,:) = rho_0*exp(-(rho_0*g/p_0)*((x(:,:,:,:)-boxlen_x/2.)**2+(y(:,:,:,:)-boxlen_y/2.)**2)*20)
+    w(2,:,:,:,:) = 1.0
+    w(3,:,:,:,:) = 1.0
+    w(4,:,:,:,:) = minval(w(1,:,:,:,:)) !p_0*exp(-(rho_0*g/p_0)*(x+y))
+case(11) ! 100% smooth rotating disk
+
+  ! initialize variables for smooth rotating disk
+  ! boxlen has to be 6x6
+  p_0 = 10e-5
+  rho_0 = 10e-5
+  rho_d = 1
+  delta_r = 0.1
+  x_center = 3.
+  y_center = 3.
+
+  !w(4,:,:,:,:)  = p_0
+  do i = 1,size_x
+    do j = 1,size_y
+      do inti = 1,order_x
+        do intj = 1,order_y
+          x_dash = x(i,j,inti,intj) - x_center
+          y_dash = y(i,j,inti,intj) - y_center
+          r = sqrt(x_dash**2 + y_dash**2)
+
+          !if (r<0.5-delta_r/2.) then
+        !    w(1,i,j,inti,intj) = rho_0
+          !else if ((r<0.5+delta_r/2.).and.(r > 0.5-delta_r/2.)) then
+        !    w(1,i,j,inti,intj) = ((exp(-2*(r-x_center)**2))**2-rho_0)/delta_r * (r - (0.5-delta_r/2.)) + rho_0
+        !  else if ((r >= 0.5+delta_r/2.).and.(r <= 2-delta_r/2.))  then
+            w(1,i,j,inti,intj) = (exp(-2*(r-2.)**2))**2
+        !  end if
+        !
+
+            if (r<=0.5-delta_r) then
+              w(2,i,j,inti,intj) = 0.
+              w(3,i,j,inti,intj) = 0.
+            else if ((r<=0.5-delta_r).and.(r > 0.5-2*delta_r)) then
+              w(2,i,j,inti,intj) = -y_dash/r**(3./2.)/(delta_r) * (r - (0.5-2*delta_r))
+              w(3,i,j,inti,intj) = x_dash/r**(3./2.)/(delta_r) * (r - (0.5-2*delta_r))
+            else if ((r > 0.5-delta_r).and.(r <= 2+delta_r))  then
+              w(2,i,j,inti,intj) = -y_dash/r**(3./2.)
+              w(3,i,j,inti,intj) = x_dash/r**(3./2.)
+            else if ((r > 2+delta_r).and.(r <= 2+2*delta_r))  then
+              w(2,i,j,inti,intj) = y_dash/r**(3./2.)/delta_r * (r - (2+delta_r)) - y_dash/r**(3./2.)
+              w(3,i,j,inti,intj) = -x_dash/r**(3./2.)/delta_r * (r - (2+delta_r)) + x_dash/r**(3./2.)
+            else if (r > 2+2*delta_r) then
+              w(2,i,j,inti,intj) = 0.
+              w(3,i,j,inti,intj) = 0.
+            end if
+
+
+        end do
+      end do
+    end do
+  end do
+  w(4,:,:,:,:) = minval(w(1,:,:,:,:))
+end select
 
   call compute_conservative(w,u,nx,ny,mx,my)
   !u = w
@@ -414,14 +482,14 @@ subroutine get_nodes_from_modes(modes,u,size_x, size_y, order_x, order_y)
   u(:,:,:,:,:) = 0.0
 
   do ivar = 1,nvar
-    do icell=1,nx
-      do jcell = 1,ny
+    do icell=1,size_x
+      do jcell = 1,size_y
         xcell=(dble(icell)-0.5)*dx
         ycell=(dble(jcell)-0.5)*dy
-        do i=1,mx
-          do j=1,my
-            do intnode = 1,mx
-              do jntnode = 1,my
+        do i=1,order_x
+          do j=1,order_y
+            do intnode = 1,order_x
+              do jntnode = 1,order_y
                 ! Loop over quadrature points
                 u(ivar,icell,jcell,i,j) = u(ivar, icell, jcell, i, j) +&
                 & modes(ivar,icell,jcell,intnode,jntnode)*&
@@ -472,7 +540,7 @@ subroutine evolve(u, x,y, u_eq)
   use parameters_dg_2d
   implicit none
 
-  real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx,1:my)::u,u_eq
+  real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx,1:my)::u,u_anal,u_eq, chars, avg_nodes
   real(kind=8),dimension(1:nx,1:ny, 1:mx,1:my)::x,y
   ! internal variables
   real(kind=8)::t,dt
@@ -498,7 +566,7 @@ subroutine evolve(u, x,y, u_eq)
     call compute_max_speed(nodes,cs_max,v_xmax,v_ymax,cmax)
     !write(*,*) 'cmax=',cmax
     write(*,*) 'csmax, umax,vmax= ', cs_max, v_xmax, v_ymax
-    dt = (cfl/dble(2*4+1))/((abs(v_xmax)+(cs_max))/dx + (abs(v_ymax)+(cs_max))/dx)
+    dt = min(tend-t,(cfl/dble(2*4+1))/((abs(v_xmax)+(cs_max))/dx + (abs(v_ymax)+(cs_max))/dx))
     if(solver=='EQL')then
 
       call compute_update(delta_u,x,y,u_eq, dudt)
@@ -515,6 +583,7 @@ subroutine evolve(u, x,y, u_eq)
       call compute_update(delta_u,x,y,u_eq,dudt)
       w1=delta_u+0.391752226571890*dt*dudt
       call apply_limiter(w1)
+      !STOP
       call compute_update(w1,x,y,u_eq,dudt)
       w2=0.444370493651235*delta_u+0.555629506348765*w1+0.368410593050371*dt*dudt
       call apply_limiter(w2)
@@ -538,6 +607,7 @@ subroutine evolve(u, x,y, u_eq)
       write(*,*) 'dt:', dt
       write(*,*) 'dudt', maxval(dudt)
       write(*,*) maxval(w1)
+      exit
     endif
 
     t=t+dt
@@ -546,6 +616,11 @@ subroutine evolve(u, x,y, u_eq)
 
     call get_nodes_from_modes(delta_u, nodes, nx, ny, mx, my)
 
+    !call compute_characteristics(nodes,chars,nx,ny,mx,my)
+    !avg_nodes = nodes
+    !call compute_cons_from_characteristics(chars,avg_nodes,nodes,nx,ny,mx,my)
+    !print*, maxval(avg_nodes - nodes),minval(avg_nodes - nodes)
+    !STOP
     if ((make_movie).and.(MODULO(iter,interval)==0)) then
       var = 1
       snap_counter = snap_counter + 1
@@ -558,7 +633,9 @@ subroutine evolve(u, x,y, u_eq)
   end do
 
   call get_nodes_from_modes(delta_u, nodes, nx, ny, mx, my)
-  u = nodes
+  call compute_error(nodes,x,y,tend,u_anal)
+   call output_file(x,y,u_anal,var,'analytical')
+   u = nodes
 end subroutine evolve
 
 subroutine get_boundary_conditions(index, dim)
@@ -651,6 +728,7 @@ subroutine compute_speed(u,cs,v_x,v_y,speed)
   ! Compute sound speed
 
   cs=sqrt(gamma*max(w(4),1d-10)/max(w(1),1d-10))
+  !cs = sqrt(1.4)
   v_x = w(2)
   v_y = w(3)
   speed=sqrt(w(2)**2+w(3)**2)+cs
@@ -756,7 +834,7 @@ end subroutine compute_llflux
 subroutine compute_update(delta_u,x,y,u_eq,dudt)
   use parameters_dg_2d
   implicit none
-  real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx, 1:my)::delta_u,dudt
+  real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx, 1:my)::delta_u,dudt_w,dudt
   real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx, 1:my)::u_eq
   real(kind=8),dimension(1:nvar,1, 1:mx, 1:nx+1, 1:ny)::F
   real(kind=8),dimension(1:nvar,1:mx, 1, 1:nx, 1:ny+1)::G
@@ -1033,10 +1111,15 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
   source_vol(:,:,:,:,:) = 0.0
   select case (source)
   case(1)
-    !WRITE(*,*) 'No source'
+      s(:,:,:,:,:) = 0.0
+          !WRITE(*,*) 'No source'
   case(2) ! sine wave (tend=1 or 10)
     call get_source(u_delta_quad,s,x,y)
     ! evaluate integral
+ case(3) !advection
+    call get_adv_source(u_delta_quad,s,x,y)
+  end select
+
     do icell=1,nx
       do jcell = 1,ny
         do i=1,mx
@@ -1055,7 +1138,6 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
         end do
       end do
     end do
-  end select
 
   !========================
   ! Compute final DG update
@@ -1073,15 +1155,22 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
           &-oneoverdx*(edge(1:nvar,icell,jcell,i,j,1)&
           &-edge(1:nvar,icell,jcell,i,j,2)) &
           &-oneoverdx*(edge(1:nvar,icell,jcell,i,j,3)&
-          &-edge(1:nvar,icell,jcell,i,j,4)) &
-          & + source_vol(1:nvar,icell,jcell,i,j))
+          &-edge(1:nvar,icell,jcell,i,j,4))) &
+          & + 2*source_vol(1:nvar,icell,jcell,i,j)
         end do
       end do
     end do
   end do
-  !print*,'max dudt:',maxval(dudt)
-  !print*,'min dudt:',minval(dudt)
+  print*,'max dudt:',maxval(dudt)
+  print*,'min dudt:',minval(dudt)
   !dudt(4,:,:,:,:) = 0.0 ! block the update on pressure
+  !call compute_primitive(dudt,dudt_w,nx,ny,mx,my)
+  !dudt_w(4,:,:,:,:) = 0.0
+  !call compute_conservative(dudt_w,dudt,nx,ny,mx,my)
+  !dudt(1:nvar,1,:,:,:) = 0.0
+ ! dudt(1:nvar,nx,:,:,:) = 0.0
+ ! dudt(1:nvar,:,1,:,:) = 0.0
+ ! dudt(1:nvar,:,ny,:,:) = 0.0
 
 end subroutine compute_update
 
@@ -1104,6 +1193,15 @@ subroutine apply_limiter(u)
 
     else if (limiter_type=='ROS') then
       call limiter_rossmanith(u)
+
+    else if (limiter_type=='1DL') then
+      call limiter_1d(u)
+
+    else if (limiter_type=='KRI') then
+            call Krivodonova(u)
+
+    else if(limiter_type=='COC') then
+        call limiter_cockburn(u)
 
     end if
 
@@ -1133,6 +1231,26 @@ subroutine get_source(u,s,x,y)
 end subroutine get_source
 !--------
 
+subroutine get_adv_source(u,s,x,y)
+  use parameters_dg_2d
+  implicit none
+
+  real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::u,s
+  real(kind=8),dimension(1:nvar,1:nx,1:nx,1:mx,1:my)::w
+  real(kind=8),dimension(1:nx,1:ny,1:mx,1:my,2)::grad_p
+  real(kind=8),dimension(1:nx,1:ny,1:mx,1:my)::x,y
+
+  call compute_primitive(u,w,nx,ny,mx,my)
+  !call grad_phi(u,x,y,grad_p)
+
+  s(1,:,:,:,:) = -1.0*u(1,:,:,:,:)
+  s(2,:,:,:,:) = 0.0
+  s(3,:,:,:,:) = 0.0
+  s(4,:,:,:,:) = 0.0
+
+end subroutine get_adv_source
+!--------
+
 subroutine grad_phi(u,x,y, grad_p)
   use parameters_dg_2d
   implicit none
@@ -1146,35 +1264,37 @@ subroutine grad_phi(u,x,y, grad_p)
 
   integer::i,j,icell,jcell
 
-  epsilon = 0.25
-  delta_r = 0.1
-  x_center = 3.
-  y_center = 3.
+  select case (grad_phi_case)
+  case(1) ! linear phi = x+y
+    grad_p(:,:,:,:,1) = x(:,:,:,:)
+    grad_p(:,:,:,:,2) = y(:,:,:,:)
+  case(2) ! gravity
+    epsilon = 0.25
+    delta_r = 0.1
+    x_center = 3.
+    y_center = 3.
 
-  do icell = 1,nx
-    do jcell = 1,ny
-      do i = 1,mx
-        do j = 1,my
-          x_dash = x(icell,jcell,i,j) - x_center
-          y_dash = y(icell,jcell,i,j) - y_center
-          r = sqrt(x_dash**2 + y_dash**2)
+    do icell = 1,nx
+      do jcell = 1,ny
+        do i = 1,mx
+          do j = 1,my
+            x_dash = x(icell,jcell,i,j) - x_center
+            y_dash = y(icell,jcell,i,j) - y_center
+            r = sqrt(x_dash**2 + y_dash**2)
 
-          if (r > 0.5-0.5*delta_r) then
-            grad_p(icell,jcell,i,j,1) = -(x_dash)/(r**3)
-            grad_p(icell,jcell,i,j,2) = -(y_dash)/(r**3)
-          else if (r <= 0.5-0.5*delta_r) then
-            grad_p(icell,jcell,i,j,1) = -(x_dash)/(r*(r**2+epsilon**2))
-            grad_p(icell,jcell,i,j,2) = -(y_dash)/(r*(r**2+epsilon**2))
-          end if
+            if (r > 0.5-0.5*delta_r) then
+              grad_p(icell,jcell,i,j,1) = -(x_dash)/(r**3)
+              grad_p(icell,jcell,i,j,2) = -(y_dash)/(r**3)
+            else if (r <= 0.5-0.5*delta_r) then
+              grad_p(icell,jcell,i,j,1) = -(x_dash)/(r*(r**2+epsilon**2))
+              grad_p(icell,jcell,i,j,2) = -(y_dash)/(r*(r**2+epsilon**2))
+            end if
 
+          end do
         end do
       end do
     end do
-  end do
-
-
-
-
+  end select
 
 end subroutine
 
@@ -1246,8 +1366,6 @@ subroutine compute_update_edit(u,x,y,u_eq,dudt)
   flux_vol1 = 0.0
   flux_vol2 = 0.0
   !flux_quad(:,:,:,:,:,:) = 0.0
-  write(*,*) 'FIND ME'
-  write(*,*) 'u_init', u(1:nvar,20,20,:,:)
 
   call get_nodes_from_modes(u,u_nodes,nx,ny,mx,my)
   call compute_flux(u_nodes,flux_quad1,flux_quad2,nx,ny,mx,my)
@@ -1554,3 +1672,175 @@ subroutine compute_update_edit(u,x,y,u_eq,dudt)
   write(*,*) 'mindudt',minval(dudt)
 
 end subroutine compute_update_edit
+
+subroutine compute_characteristics(u,chars,size_x,size_y,order_x,order_y)
+  use parameters_dg_2d
+  implicit none
+  integer::size_x,size_y, order_x, order_y
+  real(kind=8),dimension(1:nvar,1:size_x,1:size_y, 1:order_x,1:order_y)::u,u_n,w,w_m
+  real(kind=8),dimension(1:nvar,1:size_x,1:size_y, 1:order_x,1:order_y)::chars
+  real(kind=8),dimension(1:nvar)::average_u, average_w
+  REAL(kind=8), DIMENSION(nvar,nvar)::l, r, e
+  integer::icell,jcell,i,j, ivar
+
+
+  call get_nodes_from_modes(u,u_n,nx,ny,mx,my)
+  call compute_primitive(u_n,w,nx,ny,mx,my)
+  call get_modes_from_nodes(w,w_m,nx,ny,mx,my)
+
+  do icell = 1,nx
+    do jcell = 1,ny
+      do ivar = 1,nvar
+        average_u(ivar) = u(ivar,icell,jcell,1,1)!sum(u(ivar,icell,jcell,:,:))/dble(mx*my)
+        average_w(ivar) = w_m(ivar,icell,jcell,1,1)!sum(w(ivar,icell,jcell,:,:))/dble(mx*my)
+      end do
+      call get_matrix_decomp(average_u,average_w,l,r,e)
+      do i=1,mx
+        do j=1,my
+          !print*,matmul(l,u(1:nvar, icell, jcell, i , j))
+          !print*,matmul(r,matmul(l,u(1:nvar, icell, jcell, i , j)))
+          !print*,u(1:nvar, icell, jcell, i , j)
+          !STOP
+          chars(1:nvar, icell, jcell, i , j) = matmul(l,u(1:nvar, icell, jcell, i , j))
+        end do
+      end do
+    end do
+  end do
+
+end subroutine compute_characteristics
+
+
+subroutine compute_cons_from_characteristics(chars,u,u_new,size_x,size_y,order_x,order_y)
+  use parameters_dg_2d
+  implicit none
+  integer::size_x,size_y, order_x, order_y
+  real(kind=8),dimension(1:nvar,1:size_x,1:size_y, 1:order_x,1:order_y)::u,u_n,w, u_new, w_m
+  real(kind=8),dimension(1:nvar,1:size_x,1:size_y, 1:order_x,1:order_y)::chars
+  real(kind=8),dimension(1:nvar)::average_u
+  real(kind=8),dimension(1:nvar)::average_w
+  REAL(kind=8), DIMENSION(nvar,nvar)::l, r, e
+
+  integer::icell,jcell,i,j,ivar
+
+  call get_nodes_from_modes(u,u_n,nx,ny,mx,my)
+  call compute_primitive(u_n,w,nx,ny,mx,my)
+  call get_modes_from_nodes(w,w_m,nx,ny,mx,my)
+
+  do icell = 1,size_x
+    do jcell = 1,size_y
+      do ivar = 1,nvar
+        average_u(ivar) = u(ivar,icell,jcell,1,1)!sum(u(ivar,icell,jcell,:,:))/dble(mx*my)
+        average_w(ivar) = w_m(ivar,icell,jcell,1,1)!sum(w(ivar,icell,jcell,:,:))/dble(mx*my)
+      end do
+      call get_matrix_decomp(average_u,average_w,l,r,e)
+      do i=1,order_x
+        do j=1,order_y
+          u_new(1:nvar, icell, jcell, i , j) = matmul(r,chars(1:nvar, icell, jcell, i , j))
+        end do
+      end do
+    end do
+  end do
+
+end subroutine compute_cons_from_characteristics
+
+
+subroutine get_matrix_decomp(ua,wa,lev,rev,diag)
+  use parameters_dg_2d
+  implicit none
+
+  REAL(kind=8), DIMENSION(1:nvar):: wa, ua
+  REAL(kind=8):: bigu, ca, phis, theta, kappa, beta
+  REAL(kind=8), DIMENSION(4,4)::lev, rev, diag
+  REAL(kind=8), DIMENSION(2)::k
+  REAL(kind=8), DIMENSION(4)::eigenvalues
+  REAL(kind=8), DIMENSION(4,4)::MatA, MatB, GenMat, GenMat2
+
+  Real(kind=8),dimension(4)::d, tauq, taup
+  Real(kind=8),dimension(3)::e
+  REAL(kind=8), DIMENSION(4,4):: vt, vtt, cm
+  REAL(kind=8), DIMENSION(4*4):: work
+  integer::info
+
+  ! speed is zero for hydrostatic equilibrium ^_^
+  kappa=gamma-1
+
+  k(1) = 0. !/sqrt(2.)
+  k(2) = 1. !1./sqrt(2.) ! take a dodgy average
+
+
+  ! average sound speed
+  ca=SQRT(gamma*wa(4)/wa(1))
+  ! Eigenvalues
+  ! notation from: http://people.nas.nasa.gov/~pulliam/Classes/New_notes/euler_notes.pdf
+  bigU = k(1)*wa(2) + k(2)*wa(3)
+  phis = sqrt(1/2.*kappa*(wa(2)**2+wa(3)**2))
+  beta = 1./(2*ca**2)
+  theta = k(1)*wa(2) + k(2)*wa(3)
+  eigenvalues(1) = bigU
+  eigenvalues(2) = bigU
+  eigenvalues(3) = bigU + ca*sqrt(k(1)**2+k(2)**2)
+  eigenvalues(4) = bigU - ca*sqrt(k(1)**2+k(2)**2)
+
+  ! right eigenvectors
+  rev = transpose(&
+                &reshape(&
+                &(/ 1-phis**2/ca**2, kappa*wa(2)/ca**2, kappa*wa(3)/ca**2, -kappa/ca**2, &
+                &  -(k(2)*wa(2)-k(1)*wa(3)), k(2), -k(1), dble(0),    &
+                & beta*(phis**2-ca*theta), beta*(k(1)*ca - kappa*wa(2)), beta*(k(2)*ca - kappa*wa(3)), beta*kappa, &
+                & beta*(phis**2+ca*theta), -beta*(k(1)*ca + kappa*wa(2)), -beta*(k(2)*ca + kappa*wa(3)), beta*kappa &
+                &/), shape(rev)))
+
+  ! left eigenvectors
+  lev = transpose(&
+                &reshape(&
+                &(/ dble(1), dble(0), dble(1), dble(1), &
+                &  wa(2), k(2), wa(2)+k(1)*ca, wa(2)-k(1)*ca,    &
+                &  wa(3), -k(1), wa(3)+k(2)*ca, wa(3)-k(2)*ca,   &
+                &  phis**2/(kappa), k(2)*wa(2)-k(1)*wa(3), (phis**2+ca**2)/kappa + ca*theta, (phis**2+ca**2)/kappa - ca*theta  &
+                &/), shape(lev)))
+
+  diag =  transpose(&
+                &reshape(&
+                &(/ eigenvalues(1), dble(0), dble(0), dble(0), &
+                &   dble(0), eigenvalues(2), dble(0), dble(0),    &
+                &   dble(0), dble(0), eigenvalues(3), dble(0),   &
+                &   dble(0), dble(0), dble(0), eigenvalues(4) &
+                &/), shape(diag)))
+
+  MatA = transpose(&
+                &reshape(&
+                &(/ dble(0), dble(1), dble(0), dble(0), &
+                &  kappa*(wa(2)**2+wa(3)**2)/2-wa(2)**2, (3-gamma)*wa(2), -kappa*wa(2), kappa,    &
+                & -wa(2)*wa(3), wa(3), wa(2), dble(0), &
+                & (kappa*(wa(2)**2+wa(3)**2)/2-gamma*ua(4)/ua(1))*wa(2),  &
+                & gamma*ua(4)/ua(1)-kappa*(wa(2)**2+wa(3)**2)/2. - kappa*wa(2)**2, &
+                & -wa(2)*kappa*wa(3), gamma*wa(2) &
+                &/), shape(MatA)))
+
+  MatB = transpose(&
+                &reshape(&
+                &(/ dble(0), dble(0), dble(1), dble(0), &
+                & -wa(2)*wa(3), wa(3), wa(2), dble(0), &
+                &  kappa*(wa(2)**2+wa(3)**2)/2-wa(3)**2, kappa*wa(2), (3-gamma)*wa(3), kappa,    &
+                & (kappa*(wa(2)**2+wa(3)**2)/2-gamma*ua(4)/ua(1))*wa(3), -wa(2)*kappa*wa(3) , &
+                & gamma*ua(4)/ua(1)-kappa*(wa(2)**2+wa(3)**2)/2. - kappa*wa(3)**2 , gamma*wa(3) &
+                &/), shape(MatB)))
+
+
+GenMat = k(1)*MatA + k(2)*MatB
+
+!write(*,*) 'genmat', matmul(lev,rev)
+!write(*,*) 'genmat', matmul(rev,lev)
+
+!CALL dGEBRD(4,4,GenMat,4, d, e, tauq, taup)
+!  If m >= n, output is upper bidiagonal, which is our case
+!write(*,*) 'genmat'
+!write(*,*) GenMat
+!write(*,*) d, e
+
+!call sbdsqr ('U', 4, 4, 4, 4, d, e, VT, &
+!            4, VTT, 4, CM, 4, WORK, INFO)
+!write(*,*) 'vt,vtt,cm'
+!write (*,*) VT, VTT, CM
+
+end subroutine get_matrix_decomp
