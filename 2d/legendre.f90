@@ -19,7 +19,8 @@ function legendre(x,n)
   case(6)
      legendre=1.0/16.0*(231.0*x**6-315.0*x**4+105.0*x**2-5.0)
   end select
-  legendre=sqrt((2.0*dble(n)+1.0))/sqrt(2.)*legendre
+  legendre=sqrt((2.0*dble(n)+1.0))*legendre
+
   return
 end function legendre
 
@@ -44,7 +45,7 @@ function legendre_prime(x,n)
   case(6)
      legendre_prime=1.0/16.0*(1386.0*x**5-1260.0*x**3+210.0*x)
   end select
-  legendre_prime=sqrt((2.0*dble(n)+1.0))/sqrt(2.)*legendre_prime
+  legendre_prime=sqrt((2.0*dble(n)+1.0))*legendre_prime
   return
 end function legendre_prime
 
@@ -86,21 +87,26 @@ subroutine gl_quadrature(x_quad,w_quad,n)
   do i=1,n
      xx=(1.0-0.125/n/n+0.125/n/n/n)* &
           & cos(dpi*(4.0*dble(i)-1.0)/(4.0*dble(n)+2.0))
-     do iter=1,100
+     do iter=1,500
         xx=xx-legendre(xx,n)/legendre_prime(xx,n)
      end do
      x_quad(i)=-xx
      w_quad(i)=2*(2.0*dble(n)+1.0)/(1.0-x_quad(i)**2) &
-          & /legendre_prime(x_quad(i),n)**2
+          & /(legendre_prime(x_quad(i),n)**2)
+     !w_quad(i)=2./(1.0-x_quad(i)**2) &
+     !& /(sqrt(2.)*(legendre_prime(x_quad(i),n)/sqrt(2*dble(n)+1)))**2
+    ! w_quad(i)=2*(2.0*dble(n)+1.0)/(1.0-x_quad(i)**2) &
+    !      & /(legendre_prime(x_quad(i),n)**2)
+
   end do
   do i=n/2+1,n
      x_quad(i)=-x_quad(n-i+1)
      w_quad(i)=w_quad(n-i+1)
   end do
 
-  !do i=1,n
-  !   write(*,*)i,x_quad(i),w_quad(i)
-  !end do
+  do i=1,n
+     write(*,*)i,x_quad(i),w_quad(i)
+  end do
 
 end subroutine gl_quadrature
 
