@@ -256,9 +256,9 @@ subroutine get_initial_conditions(x,y,u,size_x,size_y, order_x, order_y)
     end do
 
   case(8) ! square advection
-    p_0 = 10e-5
-    rho_0 = 10e-5
-    rho_d = 1
+    p_0 = 2.5
+    rho_0 = 1.0
+    rho_d = 2.
     delta_r = 0.1
     x_center = 0.5
     y_center = 0.5
@@ -276,7 +276,7 @@ subroutine get_initial_conditions(x,y,u,size_x,size_y, order_x, order_y)
               w(1,i,j,inti,intj) = rho_0
             end if
 
-            w(2,i,j,inti,intj) = 0.0 !1.0 !1.0
+            w(2,i,j,inti,intj) = 1.0 !1.0 !1.0
             w(3,i,j,inti,intj) = 1.0 !0.0!1.0 !1.0
 
             w(4,i,j,inti,intj)  = p_0
@@ -349,23 +349,23 @@ case(11) ! 100% smooth rotating disk
             w(1,i,j,inti,intj) = (exp(-2*(r-2.)**2))**2
         !  end if
         !
+        if (r<=0.5-delta_r) then
+          w(2,i,j,inti,intj) = 0.
+          w(3,i,j,inti,intj) = 0.
+        else if ((r<=0.5-delta_r).and.(r > 0.5-2*delta_r)) then
+          w(2,i,j,inti,intj) = -y_dash/r**(3./2.)/(delta_r) * (r - (0.5-2*delta_r))
+          w(3,i,j,inti,intj) = x_dash/r**(3./2.)/(delta_r) * (r - (0.5-2*delta_r))
+        else if ((r > 0.5-delta_r).and.(r <= 2+delta_r))  then
+          w(2,i,j,inti,intj) = -y_dash/r**(3./2.)
+          w(3,i,j,inti,intj) = x_dash/r**(3./2.)
+        else if ((r > 2+delta_r).and.(r <= 2+2*delta_r))  then
+          w(2,i,j,inti,intj) = y_dash/r**(3./2.)/delta_r * (r - (2+delta_r)) - y_dash/r**(3./2.)
+          w(3,i,j,inti,intj) = -x_dash/r**(3./2.)/delta_r * (r - (2+delta_r)) + x_dash/r**(3./2.)
+        else if (r > 2+2*delta_r) then
+          w(2,i,j,inti,intj) = 0.
+          w(3,i,j,inti,intj) = 0.
+        end if
 
-            if (r<=0.5-delta_r) then
-              w(2,i,j,inti,intj) = 0.
-              w(3,i,j,inti,intj) = 0.
-            else if ((r<=0.5-delta_r).and.(r > 0.5-2*delta_r)) then
-              w(2,i,j,inti,intj) = -y_dash/r**(3./2.)/(delta_r) * (r - (0.5-2*delta_r))
-              w(3,i,j,inti,intj) = x_dash/r**(3./2.)/(delta_r) * (r - (0.5-2*delta_r))
-            else if ((r > 0.5-delta_r).and.(r <= 2+delta_r))  then
-              w(2,i,j,inti,intj) = -y_dash/r**(3./2.)
-              w(3,i,j,inti,intj) = x_dash/r**(3./2.)
-            else if ((r > 2+delta_r).and.(r <= 2+2*delta_r))  then
-              w(2,i,j,inti,intj) = y_dash/r**(3./2.)/delta_r * (r - (2+delta_r)) - y_dash/r**(3./2.)
-              w(3,i,j,inti,intj) = -x_dash/r**(3./2.)/delta_r * (r - (2+delta_r)) + x_dash/r**(3./2.)
-            else if (r > 2+2*delta_r) then
-              w(2,i,j,inti,intj) = 0.
-              w(3,i,j,inti,intj) = 0.
-            end if
 
 
         end do
@@ -545,7 +545,7 @@ subroutine evolve(u, x,y, u_eq)
   ! internal variables
   real(kind=8)::t,dt
   real(kind=8)::cmax, dx, dy, cs_max,v_xmax,v_ymax
-  real(kind=8),dimension(1:nvar,1:nx, 1:ny,1:mx,1:my)::dudt, w, w1, w2,w3,w4, delta_u,nodes
+  real(kind=8),dimension(1:nvar,1:nx, 1:ny,1:mx,1:my)::dudt, w, w1, w2,w3,w4, delta_u,nodes, temp
   integer::iter, n, i, j
   integer::snap_counter
   integer::var
@@ -601,13 +601,14 @@ subroutine evolve(u, x,y, u_eq)
 
     if(solver=='DEB')then
       call compute_update(delta_u,x,y,u_eq,dudt)
-      w1=delta_u+0.391752226571890*dt*dudt
-      write(*,*) 'maxval w1', maxval(w1)
+      w1=delta_u+0.5*dt*dudt
+      !print*,w1
+      temp = w1
       call apply_limiter(w1)
-      write(*,*) 'dt:', dt
-      write(*,*) 'dudt', maxval(dudt)
-      write(*,*) maxval(w1)
-      exit
+      delta_u = w1
+      !print*, 'diff lim',maxval(w1-temp), minval(w1-temp)
+      !print*,delta_u
+
     endif
 
     t=t+dt
@@ -694,8 +695,13 @@ subroutine compute_max_speed(u, cs_max, v_xmax, v_ymax, speed_max)
   integer::icell, jcell, j,i
   real(kind=8)::speed, cs, v_x, v_y, cs_max, v_xmax, v_ymax, speed_max
   real(kind=8),dimension(1:nvar)::w
+  integer::iloc,jloc
+  real(kind=8)::velo_max_x,velo_max_y, cs_maxi
   ! Compute max sound speed
   speed_max=0.0
+  velo_max_x = 0.0
+  velo_max_y = 0.0
+  cs_max = 0.0
   do icell=1,nx
     do jcell = 1,ny
       do i=1,mx
@@ -706,13 +712,26 @@ subroutine compute_max_speed(u, cs_max, v_xmax, v_ymax, speed_max)
             v_xmax = v_x
             v_ymax = v_y
             cs_max = cs
+            iloc = icell
+            jloc = jcell
             !cs_max = sqrt(1.4)
             call compute_primitive(u(1:nvar,icell,jcell,i,j),w,1,1,1,1)
+          end if
+          if (velo_max_x>v_x) then
+            velo_max_x = v_x
+          end if
+          if (velo_max_y>v_y) then
+            velo_max_y = v_y
+          end if
+
+          if (cs_maxi>cs) then
+            cs_maxi = cs
           end if
         end do
       end do
     end do
   end do
+  print*,'max speed and location',iloc,jloc,velo_max_y,velo_max_x,cs_maxi,cs_max
 end subroutine compute_max_speed
 
 
@@ -917,7 +936,7 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
           do intnode=1,mx
             do jntnode=1,my
               flux_vol1(1:nvar,icell,jcell,i,j)=flux_vol1(1:nvar,icell,jcell,i,j)+ &
-              & 0.25*flux_quad1(1:nvar,icell,jcell,intnode,jntnode)* & ! x direction
+              & flux_quad1(1:nvar,icell,jcell,intnode,jntnode)* & ! x direction
               & legendre_prime(x_quad(intnode),i-1)* &
               & w_x_quad(intnode)*&
               & legendre(y_quad(jntnode),j-1)* &
@@ -928,7 +947,7 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
           do intnode=1,mx
             do jntnode=1,my
               flux_vol2(1:nvar,icell,jcell,i,j) = flux_vol2(1:nvar,icell,jcell,i,j)&
-              & + 0.25*flux_quad2(1:nvar,icell,jcell,intnode,jntnode)* & !y direction
+              & + flux_quad2(1:nvar,icell,jcell,intnode,jntnode)* & !y direction
               & legendre_prime(y_quad(jntnode),j-1)* &
               & w_y_quad(jntnode)*&
               & legendre(x_quad(intnode),i-1)* &
@@ -1074,12 +1093,12 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
           do intnode = 1,mx
             edge(1:nvar,icell,jcell,i,j, 1) = &
             &edge(1:nvar,icell,jcell,i,j, 1) + &
-            &0.5*F(1:nvar,1, intnode, icell + 1, jcell)*legendre(chsi_right,i-1)*legendre(x_quad(intnode),j-1)*w_x_quad(intnode)!&
+            &F(1:nvar,1, intnode, icell + 1, jcell)*legendre(chsi_right,i-1)*legendre(x_quad(intnode),j-1)*w_x_quad(intnode)!&
             !&* dx/2.
 
             edge(1:nvar,icell,jcell,i,j,2) = &
             &edge(1:nvar,icell,jcell,i,j,2) + &
-            &0.5*F(1:nvar,1, intnode, icell, jcell)*legendre(chsi_left,i-1)*legendre(x_quad(intnode),j-1)*w_x_quad(intnode)!&
+            &F(1:nvar,1, intnode, icell, jcell)*legendre(chsi_left,i-1)*legendre(x_quad(intnode),j-1)*w_x_quad(intnode)!&
             !&* dx/2.
           end do
         end do
@@ -1094,12 +1113,12 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
 
             edge(1:nvar,icell,jcell,i,j,3) = &
             &edge(1:nvar,icell,jcell,i,j,3) + &
-            &0.5*G(1:nvar,intnode, 1, icell, jcell+1)*legendre(chsi_right,j-1)*legendre(x_quad(intnode),i-1)*w_x_quad(intnode)!&
+            &G(1:nvar,intnode, 1, icell, jcell+1)*legendre(chsi_right,j-1)*legendre(x_quad(intnode),i-1)*w_x_quad(intnode)!&
             !&* dx/2.
 
             edge(1:nvar,icell,jcell,i,j,4) = &
             &edge(1:nvar,icell,jcell,i,j,4) + &
-            &0.5*G(1:nvar, intnode, 1, icell, jcell)*legendre(chsi_left,j-1)*legendre(x_quad(intnode),i-1)*w_x_quad(intnode)!&
+            &G(1:nvar, intnode, 1, icell, jcell)*legendre(chsi_left,j-1)*legendre(x_quad(intnode),i-1)*w_x_quad(intnode)!&
             !&* dx/2.
           end do
         end do
@@ -1127,7 +1146,7 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
             do intnode=1,mx
               do jntnode=1,my
                 source_vol(1:nvar,icell,jcell,i,j) = source_vol(1:nvar,icell,jcell,i,j) + &
-                & 0.25*s(1:nvar,icell,jcell,intnode,jntnode)* &
+                & s(1:nvar,icell,jcell,intnode,jntnode)* &
                 & legendre(x_quad(intnode),i-1)* &
                 & w_x_quad(intnode)*&
                 & legendre(y_quad(jntnode),j-1)* &
@@ -1150,13 +1169,13 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
       do i=1,mx
         do j=1,my
           dudt(1:nvar,icell,jcell,i,j) = &
-          & 2*(oneoverdx*flux_vol1(1:nvar,icell,jcell,i,j) &
+          & (oneoverdx*flux_vol1(1:nvar,icell,jcell,i,j) &
           & + oneoverdx*flux_vol2(1:nvar,icell,jcell,i,j) &
           &-oneoverdx*(edge(1:nvar,icell,jcell,i,j,1)&
           &-edge(1:nvar,icell,jcell,i,j,2)) &
           &-oneoverdx*(edge(1:nvar,icell,jcell,i,j,3)&
-          &-edge(1:nvar,icell,jcell,i,j,4))) &
-          & + 2*source_vol(1:nvar,icell,jcell,i,j)
+          &-edge(1:nvar,icell,jcell,i,j,4))) !&
+          !& + source_vol(1:nvar,icell,jcell,i,j)/4.
         end do
       end do
     end do
@@ -1203,6 +1222,12 @@ subroutine apply_limiter(u)
     else if(limiter_type=='COC') then
         call limiter_cockburn(u)
 
+
+      else if(limiter_type=='PO3') then
+        call limiter_positivity_2(u)
+
+    else if(limiter_type=='ONP') then
+      call compute_positivity(u)
     end if
 
   end if
@@ -1701,7 +1726,7 @@ subroutine compute_characteristics(u,chars,size_x,size_y,order_x,order_y)
           !print*,matmul(r,matmul(l,u(1:nvar, icell, jcell, i , j)))
           !print*,u(1:nvar, icell, jcell, i , j)
           !STOP
-          chars(1:nvar, icell, jcell, i , j) = matmul(l,u(1:nvar, icell, jcell, i , j))
+          chars(1:nvar, icell, jcell, i , j) = matmul(l,u_n(1:nvar, icell, jcell, i , j))
         end do
       end do
     end do
@@ -1828,19 +1853,5 @@ subroutine get_matrix_decomp(ua,wa,lev,rev,diag)
 
 
 GenMat = k(1)*MatA + k(2)*MatB
-
-!write(*,*) 'genmat', matmul(lev,rev)
-!write(*,*) 'genmat', matmul(rev,lev)
-
-!CALL dGEBRD(4,4,GenMat,4, d, e, tauq, taup)
-!  If m >= n, output is upper bidiagonal, which is our case
-!write(*,*) 'genmat'
-!write(*,*) GenMat
-!write(*,*) d, e
-
-!call sbdsqr ('U', 4, 4, 4, 4, d, e, VT, &
-!            4, VTT, 4, CM, 4, WORK, INFO)
-!write(*,*) 'vt,vtt,cm'
-!write (*,*) VT, VTT, CM
 
 end subroutine get_matrix_decomp

@@ -432,7 +432,8 @@ subroutine compute_positivity(u)
 
    ! compute average of states
    u_avg(1:nvar,:,:) = u(1:nvar,:,:,1,1)
-   print*,'min mean density', minval(u_avg(1,:,:))
+   print*,'min mean density entrance', minval(u_avg(1,:,:)),  maxval(u_avg(1,:,:))
+   pause
    pos_nodes = nodes
    pos_nodes_n  = pos_nodes
      do icell=1,nx
@@ -463,7 +464,7 @@ subroutine compute_positivity(u)
          ! evaluate polynomial at other quadrature nodes too and extend minizing set
          p_min = minval(face_vals)
          theta = min(abs((u_avg(1,icell,jcell) - eps)/(u_avg(1,icell,jcell)-p_min)),dble(1))
-         !  print*,'theta',theta
+           print*,'theta',theta
 
          do i = 1,mx
            do j = 1,my
@@ -480,8 +481,10 @@ subroutine compute_positivity(u)
        end do
      end do
    ! 2. limit pressure
-   !if (set_to_zero==1) then
+
    pos_nodes_n = pos_nodes
+   if (set_to_zero==1) then
+   !pos_nodes_n = pos_nodes
    call get_modes_from_nodes(pos_nodes,u,nx,ny,mx,my)
    t_min = 1.
    call compute_primitive(pos_nodes,w,nx,ny,mx,my)
@@ -540,7 +543,7 @@ subroutine compute_positivity(u)
     end do
    end do
   !end do
-!end if
+end if
 
   call get_modes_from_nodes(pos_nodes_n,modes,nx,ny,mx,my)
   !
@@ -621,7 +624,7 @@ subroutine compute_positivity(u)
   !call get_modes_from_nodes(nodes,modes,nx,ny,mx,my)
    print*,'minmax',maxval(abs(u-modes)),minval(abs(modes-u))
    u = modes
-   !pAUSE
+   pAUSE
 end subroutine compute_positivity
 
 
@@ -1388,34 +1391,31 @@ function limiting(u,ivar,icell,jcell,itop,ibottom,ileft,iright,intnode,jntnode)
    real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::u
    integer::ivar,icell,jcell,itop,ibottom,ileft,iright,intnode,jntnode
    !output
-   real(kind=8)::limiting, dx
+   real(kind=8)::limiting, dx, minmod
    !internal
    real(kind=8)::d_l_x, d_l_y, d_r_x, d_r_y
    real(kind=8)::coeff_i=1.,coeff_j=1.,coeff_u=1.,central_u=1.
    real(kind=8)::minmod2d
-   dx = 1./nx
    !Write(*,*)icell,jcell,intnode,jntnode
    !coeff_j = sqrt(2.0*dble(jntnode-2)+1.0)/sqrt(2.)*sqrt(2.0*dble(intnode-1)+1.0)/sqrt(2.)
    !coeff_i = sqrt(2.0*dble(intnode-2)+1.0)/sqrt(2.)*sqrt(2.0*dble(jntnode-1)+1.0)/sqrt(2.)
 
-   coeff_j = sqrt(2.0*dble(jntnode-1)-1.0)*sqrt(2.0*dble(jntnode-1)+1.0)*2*sqrt(4*dble(intnode-1)+1)
-   coeff_i = sqrt(2.0*dble(intnode-1)-1.0)*sqrt(2.0*dble(jntnode-1)+1.0)*2*sqrt(4*dble(intnode-1)+1)
+   coeff_j = (2.0*dble(intnode-1)+1.0)
+   coeff_i = (2.0*dble(jntnode-1)+1.0)
    !coeff_j = 0.5 !0.5 !sqrt(2.0*dble(jntnode-1)-1.0)/sqrt(2.0*dble(jntnode-1)+1.0)
    !coeff_i = 0.5 !0.5 !sqrt(2.0*dble(intnode-1)-1.0)/sqrt(2.0*dble(intnode-1)+1.0)
 
    !coeff_j = 1/(2.*sqrt(4.0*dble(jntnode-1)**2-1.0))
    !coeff_i = 1/(2.*sqrt(4.0*dble(intnode-1)**2-1.0))
-   coeff_u = sqrt(2.0*dble(intnode-1)+1.0)/sqrt(2.)*sqrt(2.0*dble(jntnode-1)+1.0)
+   coeff_u = (2.0*dble(intnode-1)+1.0)*(2.0*dble(jntnode-1)+1.0)
    central_u = u(ivar,icell,jcell,intnode,jntnode)
 
-   d_r_y = (u(ivar,icell,itop,intnode,jntnode-1)-u(ivar,icell,jcell,intnode,jntnode-1))/coeff_j
+   d_r_y = (u(ivar,icell,itop,intnode,jntnode-1)-u(ivar,icell,jcell,intnode,jntnode-1))*coeff_j
+   d_l_y = (u(ivar,icell,jcell,intnode,jntnode-1)-u(ivar,icell,ibottom,intnode,jntnode-1))*coeff_j
+   d_r_x = (u(ivar,iright,jcell,intnode-1,jntnode)-u(ivar,icell,jcell,intnode-1,jntnode))*coeff_i
+   d_l_x = (u(ivar,icell,jcell,intnode-1,jntnode)-u(ivar,ileft,jcell,intnode-1,jntnode))*coeff_i
 
-   d_l_y = (u(ivar,icell,jcell,intnode,jntnode-1)-u(ivar,icell,ibottom,intnode,jntnode-1))/coeff_j
-
-   d_r_x = (u(ivar,iright,jcell,intnode-1,jntnode)-u(ivar,icell,jcell,intnode-1,jntnode))/coeff_i
-   d_l_x = (u(ivar,icell,jcell,intnode-1,jntnode)-u(ivar,ileft,jcell,intnode-1,jntnode))/coeff_i
-
-   limiting = minmod2d(central_u/coeff_u, d_r_y, d_l_y, d_r_x, d_l_x)*coeff_u
+   limiting = minmod2d(central_u*coeff_u, d_r_y, d_l_y, d_r_x, d_l_x)/coeff_u
    !Write(*,*) icell,jcell,intnode,jntnode,d_r_y,d_l_y,d_r_x,d_l_x,central_u,limiting
 
    return
@@ -1429,32 +1429,23 @@ subroutine high_order_limiter(u)
     real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::nodes, modes
     real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::chars, chars_m, u_temp
     real(kind=8),dimension(1:nvar,1:nx,1:ny)::u_avg
-    real(kind=8)::limited,limited2,limiting
+    real(kind=8)::limited,limited2,limiting,eps,generalized_minmod
     real(kind=8)::d_l_x, d_l_y, d_r_x, d_r_y
     real(kind=8)::coeff,coeff_u,minmod, coeff_x, coeff_y
     integer::i,j,icell,jcell, ivar, itop,ibottom,ileft,iright
     integer::intnode, jntnode
     integer::done
+    real(kind=8),dimension(1:nvar)::u_left,u_right,w_left,w_right, u_top, u_bottom,legendre
+    integer::chsi_right,chsi_left, set_to_zero
 
     if (mx==1.and.my==1) then
       ! no limiting when we only have 1st order approx
       !use_limiter = .false.
       return
     end if
-    ! call compute_primitive(u,w,nx,ny,mx,my)
-    ! TODO: implement characteristic variable representation
-    ! using Roe average
-    !write(*,*) u(1,1,1,:,:)
-
-    !call get_nodes_from_modes(u,nodes,nx,ny,mx,my)
-    !call compute_characteristics(nodes,chars,nx,ny,mx,my)
-    !call get_modes_from_nodes(chars,chars_m,nx,ny,mx,my)
+    eps = 10e-10
     u_new = u
-    !u_temp = u
-    !u = chars_m
-    !u_new = u
-    print*,maxval(u)
-    !pause
+
     do ivar = 1,nvar
       do icell=1,nx
         do jcell = 1,ny
@@ -1468,67 +1459,62 @@ subroutine high_order_limiter(u)
           call get_boundary_conditions(itop,2)
           call get_boundary_conditions(ibottom,2)
           do intnode = mx,2,-1
-
+            !print*,intnode
             limited = limiting(u,ivar,icell,jcell,itop,ibottom,ileft,iright,intnode,intnode)
-            if(limited .ne. u(ivar,icell,jcell,intnode,intnode))then
-                u_new(ivar,icell,jcell,intnode,intnode)=limited
-            else
-                exit
-            end if
-
+             if(limited .ne. u(ivar,icell,jcell,intnode,intnode))then
+                 u_new(ivar,icell,jcell,intnode,intnode)=limited
+             else
+                 exit
+             end if
+            ! u_new(ivar,icell,jcell,intnode,intnode)= limited
             do jntnode = intnode-1,2,-1
-              limited = limiting(u,ivar,icell,jcell,itop,ibottom,ileft,iright,intnode,jntnode)
-              limited2 = limiting(u,ivar,icell,jcell,itop,ibottom,ileft,iright,jntnode,intnode)
-              if((limited .ne. u(ivar,icell,jcell,intnode,jntnode)) .or. (limited2 .ne. u(ivar,icell,jcell,jntnode,intnode))) then
-                u_new(ivar,icell,jcell,intnode,jntnode)=limited
-                u_new(ivar,icell,jcell,jntnode,intnode)=limited2
-              else
-                done = 1
-                exit
-              end if
-            end do
+               limited = limiting(u,ivar,icell,jcell,itop,ibottom,ileft,iright,intnode,jntnode)
+               limited2 = limiting(u,ivar,icell,jcell,itop,ibottom,ileft,iright,jntnode,intnode)
+               if((abs(limited - u(ivar,icell,jcell,intnode,jntnode))<eps) &
+               &.and. (abs(limited2 - u(ivar,icell,jcell,jntnode,intnode))<eps)) then
+                 done = 1
+                 exit
+               else
+                 u_new(ivar,icell,jcell,intnode,jntnode)=limited
+                 u_new(ivar,icell,jcell,jntnode,intnode)=limited2
+               end if
+             end do
+            !
+             if (done .eq. 1) then
+                   exit
+             end if
 
-            if (done .eq. 1) then
-                  exit
-            end if
-            !coeff = sqrt(2.0*dble(intnode-2)+1.0)/2.
-            coeff_x = sqrt(2*dble(intnode-2)+1)*sqrt(2*dble(jntnode-1)+1)*2*sqrt(4*dble(intnode-1)**2+1)
-            coeff_y = sqrt(2*dble(intnode-1)+1)*sqrt(2*dble(jntnode-2)+1)*2*sqrt(4*dble(jntnode-1)**2+1)  !sqrt(2.0*dble(intnode-1)-1.0)*sqrt(2.0*dble(intnode-1)+1.0)
-            coeff_u = sqrt(2*dble(intnode-1)+1)*sqrt(2*dble(jntnode-1)+1) !sqrt(2.0*dble(intnode-1)+1.0)
-            !coeff = 1/(2.*sqrt(4*dble(intnode-1)**2-1))
-            d_r_y = u(ivar,icell,itop,1,intnode-1) - &
-                & u(ivar,icell,jcell,1,intnode-1)
+            !coeff_x = (2*dble(jntnode-2)+1)
+            coeff_y = (2*dble(intnode-1)+1)  !sqrt(2.0*dble(intnode-1)-1.0)*sqrt(2.0*dble(intnode-1)+1.0)
+            coeff_u = (2*dble(intnode-1)+1)
 
-            d_l_y = u(ivar,icell,jcell,1,intnode-1) - &
-                & u(ivar,icell,ibottom,1,intnode-1)
-
-            d_r_x = u(ivar,iright,jcell,intnode-1,1) - &
+            d_r_y = u(ivar,icell,itop,intnode-1,1) - &
                 & u(ivar,icell,jcell,intnode-1,1)
 
-            d_l_x = u(ivar,icell,jcell,intnode-1,1) - &
-                & u(ivar,ileft,jcell,intnode-1,1)
+            d_l_y = u(ivar,icell,jcell,intnode-1,1) - &
+                & u(ivar,icell,ibottom,intnode-1,1)
 
-            limited = minmod(u(ivar,icell,jcell,1,intnode)/coeff_u,d_r_y/coeff_x,d_l_y/coeff_y)*coeff_u
-            limited2 = minmod(u(ivar,icell,jcell,intnode,1)/coeff_u,d_r_x/coeff_x,d_l_x/coeff_y)*coeff_u
-            !Write(*,*) icell,jcell,intnode,coeff_u*u(ivar,icell,jcell,1,intnode),&
-            !&coeff*d_r_y,coeff*d_l_y,coeff*d_r_x,coeff*d_l_x,limited/coeff_u
-            if((limited .ne. u(ivar,icell,jcell,1,intnode)) .or. (limited2 .ne. u(ivar,icell,jcell,intnode,1))) then
-               u_new(ivar,icell,jcell,1,intnode)=limited
-               u_new(ivar,icell,jcell,intnode,1)=limited2
+            d_r_x = u(ivar,iright,jcell,1,intnode-1) - &
+                & u(ivar,icell,jcell,1,intnode-1)
+
+            d_l_x = u(ivar,icell,jcell,1,intnode-1) - &
+                & u(ivar,ileft,jcell,1,intnode-1)
+
+            limited = generalized_minmod(u(ivar,icell,jcell,1,intnode)*coeff_u,d_r_y*coeff_y,d_l_y*coeff_y)/coeff_u
+            limited2 = generalized_minmod(u(ivar,icell,jcell,intnode,1)*coeff_u,d_r_x*coeff_y,d_l_x*coeff_y)/coeff_u
+            !Write(*,*) icell,jcell,intnode,u(ivar,icell,jcell,1,intnode)*coeff_u,d_r_x*coeff_y,d_l_x*coeff_y,limited2
+            if((limited == u(ivar,icell,jcell,1,intnode)) .and. (limited2 == u(ivar,icell,jcell,intnode,1))) then
+              print*,'no limiting'
+              exit
             else
-               exit
+              u_new(ivar,icell,jcell,1,intnode)=limited
+              u_new(ivar,icell,jcell,intnode,1)=limited2
+              print*,'limiting'
             end if
           end do
         end do
      end do
    end do
-  ! Update variables with limited states
-
-  !call get_nodes_from_modes(u_new,chars,nx,ny,mx,my)
-  !print*,'min mean average on HIO',minval(chars)
-  !call compute_cons_from_characteristics(chars,u_temp,w,nx,ny,mx,my)
-  !print*,'min mean average on HIO',minval(w)
-  !call get_modes_from_nodes(w,u_new,nx,ny,mx,my)
 
   u = u_new
   u_avg = u(1:nvar,:,:,1,1)
@@ -1536,7 +1522,10 @@ subroutine high_order_limiter(u)
   !call compute_positivity(u)
   !call limiter_pp(u)
   !write(*,*) u(1,1,1,:,:)
-  !pause
+  !pausel
+
+  call positivity_on_faces(u)
+
   end subroutine high_order_limiter
 
 
@@ -1758,12 +1747,13 @@ subroutine high_order_limiter(u)
           end do
 
           if ((abs(u(ivar,icell,jcell,1,2))+abs(u(ivar,icell,jcell,2,1)))<eps) then
-            vs = abs(min(abs(max(max_temp,eps)),abs(min(eps,min_temp)))/(eps))
+            vs = min(abs(max(max_temp,eps)),abs(min(eps,min_temp)))/(eps)
           else
-            vs = abs(min(abs(max(max_temp,eps)),abs(min(eps,min_temp)))/(abs(u(ivar,icell,jcell,1,2))+abs(u(ivar,icell,jcell,2,1))))
+            vs = min(abs(max(max_temp,eps)),abs(min(eps,min_temp)))/(abs(u(ivar,icell,jcell,1,2))+abs(u(ivar,icell,jcell,2,1)))
           end if
           !print*,vs
-          !print*,'min',min(vs,1.),min(vs,1.)
+          !print*,'min',min(vs,1.)
+          vs = 0.5
           u_lim(ivar,icell,jcell,1,2) = min(vs,1.)*u(ivar,icell,jcell,1,2)
           u_lim(ivar,icell,jcell,2,1) = min(vs,1.)*u(ivar,icell,jcell,2,1)
           !if (u_lim(1,icell,jcell,1,1)<0.0) then
