@@ -312,7 +312,7 @@ end subroutine compute_limiter
 real(kind=8) function solve_for_t(u,u_avg)
   use parameters_dg_2d
   implicit none
-  real(kind=8)::p,a,b,c, root2, root1, q
+  real(kind=8)::p,a,b,c, root2, root1, q,t1,t2,t,D
   real(kind=8)::pa,mxa,mya,ea,pj,mxj,myj,ej,xx
   real(kind=8),dimension(1:nvar)::u, u_avg
   integer::iter
@@ -325,29 +325,32 @@ real(kind=8) function solve_for_t(u,u_avg)
   !print*,u,u_avg
   pa = u_avg(1); mxa = u_avg(2); mya = u_avg(3); ea = u_avg(4)
   pj = u(1); mxj = u(2); myj = u(3); ej = u(4)
-  a = (gamma-1)*((-pa+pj)*(-Ea+Ej)-(1./2.)*(-mxa+mxj)**2-(1./2.)*(-mya+myj)**2)
-  b = (gamma-1)*(pa*(-Ea+Ej)+(-pa+pj)*Ea-mxa*(-mxa+mxj)-mya*(-mya+myj))-eps*(-pa+pj)
-  c = (gamma-1)*(pa*Ea-(1./2.)*mxa**2-(1./2.)*mya**2)-eps*pa
+  !a = (gamma-1)*((-pa+pj)*(-Ea+Ej)-(1./2.)*(-mxa+mxj)**2-(1./2.)*(-mya+myj)**2)
+  !b = (gamma-1)*(pa*(-Ea+Ej)+(-pa+pj)*Ea-mxa*(-mxa+mxj)-mya*(-mya+myj))-eps*(-pa+pj)
+  !c = (gamma-1)*(pa*Ea-(1./2.)*mxa**2-(1./2.)*mya**2)-eps*pa
   !print*,a,b,c
-  q = -1./2.*(b+sign(dble(1),b)*sqrt(b**2-4*a*c))
-  !print*,q
+  a = 2.0*(pj-pa)*(ej-ea) - (mxj-mxa)**2 - (myj-mya)**2
+  b = 2.0*(pj-pa)*(ea-eps/(gamma-1)) + 2*pa*(ej-ea) - 2*(mxa*(mxj-mxa)+mya*(myj-mya))
+  c = 2.0*pa*ea - (mxa**2+mya**2) - 2.0*eps*pa/(gamma-1.0)
+  b = b/a
+  c = c/a
+  D = sqrt(abs(b*b-4*c))
+  t1 = 0.5*(-b-D)
+  t2 = 0.5*(-b+D)
 
-  root1 = q/a
-  root2 = c/q
-  print*,root1
-  print*,root2
-  solve_for_t = root1
+  if((t1 > -1.0e-12) .and. (t1 < 1.0 + 1.0e-12)) then
+    t = t1
+  else if((t2 > -1.0e-12).and.(t2 < 1.0 + 1.0e-12)) then
+    t = t2
+  else
+    print*,'error, setting t to zero'
+    t = 0.0
+  end if
 
-
-  ! recursion
-  xx=-b/(a)
-  do iter=1,500
-      xx=xx-(a*xx**2+b*xx+c)/(2*a*xx+b)
-  end do
-  solve_for_t = xx
-
+  t = min(1.0,t)
+  t = max(0.0,t)
+  solve_for_t = t
   return
-
 end function solve_for_t
 
 subroutine compute_set(modes, node_points)
@@ -462,9 +465,11 @@ subroutine compute_positivity(u)
          !end do
          call compute_set(u(1:nvar,icell,jcell,:,:),face_vals)
          ! evaluate polynomial at other quadrature nodes too and extend minizing set
+
+         !minimizing_set(:,:) = nodes(1,icell,jcell,:,:)
          p_min = minval(face_vals)
-         theta = min(abs((u_avg(1,icell,jcell) - eps)/(u_avg(1,icell,jcell)-p_min)),dble(1))
-           print*,'theta',theta
+         theta = min(abs((u_avg(1,icell,jcell)-eps)/(u_avg(1,icell,jcell)-p_min)),dble(1))
+          ! print*,'theta',theta
 
          do i = 1,mx
            do j = 1,my
@@ -483,7 +488,7 @@ subroutine compute_positivity(u)
    ! 2. limit pressure
 
    pos_nodes_n = pos_nodes
-   if (set_to_zero==1) then
+   !if (set_to_zero==1) then
    !pos_nodes_n = pos_nodes
    call get_modes_from_nodes(pos_nodes,u,nx,ny,mx,my)
    t_min = 1.
@@ -511,14 +516,18 @@ subroutine compute_positivity(u)
          call compute_set(u(1:nvar,icell,jcell,:,:),face_vals)
          do i = 1,mx*my+4*mx
            call compute_primitive(face_vals(1:nvar,i),w_face_vals(1:nvar,i),1,1,1,1)
+
+           !minimizing_set(:,:) = nodes(1,icell,jcell,:,:)
            !print*,face_vals(1:nvar,i)
            !print*, w_face_vals(1:nvar,i)
+            !print*, w_face_vals(4,i)
            if (w_face_vals(4,i) > eps) then
                 t = 1.
            else
-                !t = solve_for_t(w_face_vals(4,i),u_avg(4,icell,jcell))
-                !print*,t
-                t=0.0
+                t = solve_for_t(w_face_vals(4,i),u_avg(4,icell,jcell))
+                print*,t
+                !pause
+                !t = 0.0
            end if
            if (t_min>t) then
                t_min = t
@@ -529,13 +538,10 @@ subroutine compute_positivity(u)
         do j=1,my
           pos_nodes_n(1:nvar,icell,jcell,i,j) = u_avg(1:nvar,icell,jcell) + &
                                             &t_min*(pos_nodes(1:nvar,icell,jcell,i,j)-u_avg(1:nvar,icell,jcell))
-          if ( pos_nodes_n(1,icell,jcell,i,j)<eps) then
-            print*, 'avg',u_avg(1,icell,jcell)
-            print*, 'pos nodes negative before?',pos_nodes(1,icell,jcell,i,j)
-            print*, 'pos nodes negative?',pos_nodes_n(1,icell,jcell,i,j)
-            pos_nodes_n(1:nvar,icell,jcell,i,j) = u(1:nvar,icell,jcell,1,1)
-            !pause
-          end if
+          !if ( pos_nodes_n(1,icell,jcell,i,j)<eps) then
+          !  pos_nodes_n(1:nvar,icell,jcell,i,j) = u(1:nvar,icell,jcell,1,1)
+          !pause
+          !end if
          end do
        end do
        t_min = 1.
@@ -543,7 +549,7 @@ subroutine compute_positivity(u)
     end do
    end do
   !end do
-end if
+!end if
 
   call get_modes_from_nodes(pos_nodes_n,modes,nx,ny,mx,my)
   !
@@ -631,9 +637,10 @@ end subroutine compute_positivity
 subroutine positivity_on_faces(modes)
   use parameters_dg_2d
   implicit none
-  real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my):: modes
+  real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my):: modes, nodes, w_nodes
   real(kind=8),dimension(1:nvar)::u_left,u_right,w_left,w_right
   integer::chsi_right,chsi_left, set_to_zero
+  real(kind=8),dimension(1:nvar,1:nx,1:ny):: u_avg,w_avg
 
   integer::i,j,icell,jcell, ivar, intnode,jntnode
   real(kind=8)::legendre
@@ -646,7 +653,10 @@ subroutine positivity_on_faces(modes)
    call gl_quadrature(x_quad,w_x_quad,mx)
    call gl_quadrature(y_quad,w_y_quad,my)
 
-
+  u_avg(:,:,:) = modes(:,:,:,1,1)
+  call compute_primitive(u_avg,w_avg,nx,ny,1,1)
+  call get_nodes_from_modes(modes,nodes,nx,ny,mx,my)
+  call compute_primitive(nodes,w_nodes,nx,ny,mx,my)
   do icell=1,nx
    do jcell = 1,ny
 
@@ -693,21 +703,45 @@ subroutine positivity_on_faces(modes)
       !print*,'wright', w_right
       !print*,i,j,icell,jcell
 
-      if ((w_left(1)<eps).or.(w_left(4)<eps).or.(w_right(1)<eps).or.(w_right(4)<eps)) then
+      if ((w_left(1)<eps).or.(w_left(4)<eps))then
             set_to_zero=1
       end if
    end do
 
+   do intnode=1,mx
+     do jntnode=1,my
+         if ((w_nodes(1,icell,jcell,intnode,jntnode)<eps).or.&
+         &(w_nodes(4,icell,jcell,intnode,jntnode)<eps)) then
+          set_to_zero = 1
+         end if
+       end do
+     end do
+
     if (set_to_zero==1) then
-      modes(1:nvar,icell,jcell,2:mx,2:my) = 0.0
-      modes(1:nvar,icell,jcell,1,2:my) = 0.0
-      modes(1:nvar,icell,jcell,2:mx,1) = 0.0
+      !print*,u_avg(ivar,icell,jcell)
+      modes(1,icell,jcell,1,1)  = u_avg(1,icell,jcell)
+      modes(1,icell,jcell,2:mx,2:my) = 0.0
+      modes(1,icell,jcell,1,2:my) = 0.0
+      modes(1,icell,jcell,2:mx,1) = 0.0
+
+      modes(4,icell,jcell,1,1)  = 0.1/(gamma-1) + 0.5*u_avg(1,icell,jcell)*(u_avg(2,icell,jcell)**2/u_avg(1,icell,jcell) +&
+      u_avg(3,icell,jcell)**2/u_avg(1,icell,jcell))
+      modes(4,icell,jcell,2:mx,2:my) = 0.0
+      modes(4,icell,jcell,1,2:my) = 0.0
+      modes(4,icell,jcell,2:mx,1) = 0.0
     end if
     !print*,'set to  zero', set_to_zero
     set_to_zero = 0
 
  end do
 end do
+
+!call get_nodes_from_modes(modes, nodes, nx,ny,mx,my)
+!call compute_primitive(nodes, w_nodes, nx,ny,mx,my)
+!w_nodes(4,:,:,:,:) = 0.1
+!call compute_conservative(w_nodes, nodes, nx,ny,mx,my)
+!call get_modes_from_nodes(nodes, modes,nx,ny,mx,my)
+
 
 end subroutine positivity_on_faces
 
@@ -1400,8 +1434,8 @@ function limiting(u,ivar,icell,jcell,itop,ibottom,ileft,iright,intnode,jntnode)
    !coeff_j = sqrt(2.0*dble(jntnode-2)+1.0)/sqrt(2.)*sqrt(2.0*dble(intnode-1)+1.0)/sqrt(2.)
    !coeff_i = sqrt(2.0*dble(intnode-2)+1.0)/sqrt(2.)*sqrt(2.0*dble(jntnode-1)+1.0)/sqrt(2.)
 
-   coeff_j = (2.0*dble(intnode-1)+1.0)
-   coeff_i = (2.0*dble(jntnode-1)+1.0)
+   coeff_j = (2.0*dble(intnode-1)+1.0)!*(2*dble(jntnode-1)-1)
+   coeff_i = (2.0*dble(jntnode-1)+1.0)!*(2*dble(intnode-1)-1)
    !coeff_j = 0.5 !0.5 !sqrt(2.0*dble(jntnode-1)-1.0)/sqrt(2.0*dble(jntnode-1)+1.0)
    !coeff_i = 0.5 !0.5 !sqrt(2.0*dble(intnode-1)-1.0)/sqrt(2.0*dble(intnode-1)+1.0)
 
@@ -1504,12 +1538,12 @@ subroutine high_order_limiter(u)
             limited2 = generalized_minmod(u(ivar,icell,jcell,intnode,1)*coeff_u,d_r_x*coeff_y,d_l_x*coeff_y)/coeff_u
             !Write(*,*) icell,jcell,intnode,u(ivar,icell,jcell,1,intnode)*coeff_u,d_r_x*coeff_y,d_l_x*coeff_y,limited2
             if((limited == u(ivar,icell,jcell,1,intnode)) .and. (limited2 == u(ivar,icell,jcell,intnode,1))) then
-              print*,'no limiting'
+              !print*,'no limiting'
               exit
             else
               u_new(ivar,icell,jcell,1,intnode)=limited
               u_new(ivar,icell,jcell,intnode,1)=limited2
-              print*,'limiting'
+              !print*,'limiting'
             end if
           end do
         end do
@@ -1520,12 +1554,12 @@ subroutine high_order_limiter(u)
   u_avg = u(1:nvar,:,:,1,1)
   print*,'min mean average on HIO',minval(u_avg(1,:,:))
   !call compute_positivity(u)
-  !call limiter_pp(u)
+  call limiter_pp(u)
   !write(*,*) u(1,1,1,:,:)
   !pausel
 
-  call positivity_on_faces(u)
-
+  !call positivity_on_faces(u)
+  !call compute_positivity(u)
   end subroutine high_order_limiter
 
 
@@ -1753,7 +1787,10 @@ subroutine high_order_limiter(u)
           end if
           !print*,vs
           !print*,'min',min(vs,1.)
-          vs = 0.5
+          !vs = 0.5
+          vs = min(vs,1.)
+          vs = max(vs,0.)
+          vs = 0.0
           u_lim(ivar,icell,jcell,1,2) = min(vs,1.)*u(ivar,icell,jcell,1,2)
           u_lim(ivar,icell,jcell,2,1) = min(vs,1.)*u(ivar,icell,jcell,2,1)
           !if (u_lim(1,icell,jcell,1,1)<0.0) then
