@@ -11,7 +11,7 @@ function legendre(x,n)
   case(2)
      legendre = 0.5*(3*x**2-1)
   case(3)
-     legendre=0.5*(5.0*x**3-3.0*x)
+     legendre = 0.5*(5.0*x**3-3.0*x)
   case(4)
      legendre=0.125*(35.0*x**4-30.0*x**2+3.0)
   case(5)
@@ -104,35 +104,70 @@ subroutine gl_quadrature(x_quad,w_quad,n)
      w_quad(i)=w_quad(n-i+1)
   end do
 
-  do i=1,n
-     write(*,*)i,x_quad(i),w_quad(i)
-  end do
 
 end subroutine gl_quadrature
 
 
-!subroutine gll_quadrature(x_quad,w_quad,n)
-!  integer::n
-!  real(kind=8),dimension(1:n)::x_quad,w_quad
-!  real(kind=8), dimension(1:(n-2))::x_quad_inner, w_quad_inner
-!  integer::i,iter
-!  real(kind=8)::dpi=acos(-1.0d0),xx
-!  real(kind=8)::legendre,legendre_prime
+subroutine gll_quadrature(x_quad,w_quad,n)
+  integer::n
+  real(kind=8),dimension(1:n)::x_quad,w_quad
+  real(kind=8), dimension(1:(n-2))::x_quad_inner, w_quad_inner
+  integer::i,iter
+  real(kind=8)::dpi=acos(-1.0d0),xx
+  real(kind=8)::legendre,legendre_prime
 
-!  x_quad(1) = -1
-!  w_quad(1) = 2/(dble(n)*dble(n-1))
-!  x_quad(n) = 1
-!  w_quad(n) = 2/(dble(n)*dble(n-1))
+ select case(n)
+ case(1)
+   print*,'error'
+ case(2)
+   x_quad(1) = -1.
+   w_quad(1) = 1.
+   x_quad(2) = 0.
+   w_quad(2) = 1.
+ case(3)
+   x_quad(1) = -1.
+   w_quad(1) = 3./4.
+   x_quad(3) = 1.
+   w_quad(3) = 3./4.
+   x_quad(2) = 0.
+   w_quad(2) = 1./4.
+ case(4)
+   x_quad(1) = -1.
+   w_quad(1) = 1./6.
+   x_quad(2) = -1./5.*sqrt(5.)
+   w_quad(2) = 5./6.
+   x_quad(3) = 1./5.*sqrt(5.)
+   w_quad(3) = 5./6.
+   x_quad(4) = 1.
+   w_quad(4) = 1./6.
+ case(5)
+   x_quad(1) = -1.
+   w_quad(1) = 1./10.
+   x_quad(2) = -1./7.*sqrt(21.)
+   w_quad(2) = 49./90.
+   x_quad(3) = 0.0
+   w_quad(3) = 32./45.
+   x_quad(4) = 1./7.*sqrt(21.)
+   w_quad(4) = 49./90.
+   x_quad(5) = 1.
+   w_quad(5) = 1./10.
+ case(6)
+   x_quad(1) = -1.
+   w_quad(1) = 1./15.
+   x_quad(2) = -sqrt(1./21.*(7+2*sqrt(7.)))
+   w_quad(2) = 1./30.*(14.-sqrt(7.))
+   x_quad(3) = -sqrt(1./21.*(7-2*sqrt(7.)))
+   w_quad(3) = 1./30.*(14.+sqrt(7.))
+   x_quad(4) = sqrt(1./21.*(7-2*sqrt(7.)))
+   w_quad(4) = 1./30.*(14.+sqrt(7.))
+   x_quad(5) = sqrt(1./21.*(7+2*sqrt(7.)))
+   w_quad(5) = 1./30.*(14.-sqrt(7.))
+   x_quad(6) = 1.
+   w_quad(6) = 1./15.
+ end select
 
-!  do i = 2,n-1
-!    xx = (1-3*(n-2)/(8*(n-1)**3))* &
-!        & cos(dpi*(4.0*dble(i)-3)/(4*(n-1)+1))
-!    for iter=1,50
-!        xx = x - 2*legendre_prime()*legendre_prime_prime()/&
-!        & (2*legendre_prime_prime()**2-lendre
-!  write(*,*)'quad=',x_quad_inner,w_quad_inner
 
-!end subroutine gll_quadrature
+end subroutine gll_quadrature
 
 real(kind=8) function lagrange_poly(x_points, y_points, x, n)
   implicit none

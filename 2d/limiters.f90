@@ -338,9 +338,9 @@ real(kind=8) function solve_for_t(u,u_avg)
   t1 = 0.5*(-b-D)
   t2 = 0.5*(-b+D)
 
-  if((t1 > -1.0e-12) .and. (t1 < 1.0 + 1.0e-12)) then
+  if((t1 > -1.0e-20) .and. (t1 < 1.0 + 1.0e-20)) then
     t = t1
-  else if((t2 > -1.0e-12).and.(t2 < 1.0 + 1.0e-12)) then
+  else if((t2 > -1.0e-20).and.(t2 < 1.0 + 1.0e-20)) then
     t = t2
   else
     print*,'error, setting t to zero'
@@ -357,10 +357,10 @@ subroutine compute_set(modes, node_points)
   use parameters_dg_2d
   implicit none
   real(kind=8),dimension(1:nvar,1:mx,1:my)::modes, nodes
-  real(kind=8),dimension(1:nvar,1:(mx*my+4*mx))::node_points
+  real(kind=8),dimension(1:nvar,1:(mx)*gll+(my)*gll)::node_points
   real(kind=8),dimension(1:nvar)::u_left,u_right, u_top, u_bottom
   real(kind=8)::legendre
-  integer::ivar,intnode,i,j
+  integer::ivar,intnode,i,j, jntnode
   integer::chsi_right,chsi_left
   call get_nodes_from_modes(modes,nodes,1,1,mx,my)
 
@@ -369,30 +369,29 @@ subroutine compute_set(modes, node_points)
 
   call gl_quadrature(x_quad,w_x_quad,mx)
   call gl_quadrature(y_quad,w_y_quad,my)
-
-  do ivar=1,nvar
-    node_points(ivar,1:mx*my) = reshape(nodes(ivar,:,:),(/1*mx*my/))
-  end do
+  call gll_quadrature(x_gll_quad,w_gll_quad,gll)
 
   do intnode = 1,my
-    u_left = 0.0
-    u_right = 0.0
-    u_top = 0.0
-    u_bottom = 0.0
-    do i=1,mx
-      do j=1,my
-           u_left = u_left + modes(1:nvar,i,j)*legendre(chsi_left,i-1)*legendre(y_quad(intnode),j-1)
-           u_right = u_right + modes(1:nvar,i,j)*legendre(chsi_right,i-1)*legendre(y_quad(intnode),j-1)
-           u_top = u_top + modes(1:nvar,i,j)*legendre(chsi_left,j-1)*legendre(x_quad(intnode),i-1)
-           u_bottom = u_bottom + modes(1:nvar,i,j)*legendre(chsi_right,j-1)*legendre(x_quad(intnode),i-1)
+    do jntnode = 1,gll
+      u_left = 0.0
+      u_right = 0.0
+      do i=1,mx
+        do j=1,my
+             u_left = u_left + modes(1:nvar,i,j)*legendre(x_gll_quad(jntnode),i-1)*legendre(y_quad(intnode),j-1)
+             u_right = u_right + modes(1:nvar,i,j)*legendre(x_quad(intnode),i-1)*legendre(x_gll_quad(jntnode),j-1)
+        end do
       end do
+      node_points(1:nvar,(intnode-1)*gll+jntnode) = u_left(1:nvar)
+      node_points(1:nvar,(intnode-1)*gll+jntnode+my*gll) = u_right(1:nvar)
+      !print*,(intnode-1)*gll+jntnode
+      !print*,(intnode-1)*gll+jntnode+my*gll
     end do
-    node_points(1:nvar,(intnode-1)*4+1+mx*my) = u_left(1:nvar)
-    node_points(1:nvar,(intnode-1)*4+2+mx*my) = u_right(1:nvar)
-    node_points(1:nvar,(intnode-1)*4+3+mx*my) = u_top(1:nvar)
-    node_points(1:nvar,(intnode-1)*4+4+mx*my) = u_bottom(1:nvar)
   end do
-
+  !print*,node_points
+  !pause
+  if (maxval(node_points).le.-1) then
+    print*, 'node points',node_points
+  end if
 end subroutine compute_set
 
 
@@ -410,7 +409,7 @@ subroutine compute_positivity(u)
    real(kind=8),dimension(1:mx,1:my)::minimizing_set
    real(kind=8),dimension(1:nvar)::u_left,u_right,w_left,w_right, u_top, u_bottom
    integer::chsi_right,chsi_left, set_to_zero
-   real(kind=8),dimension(1:nvar,1:(mx*my+4*mx))::face_vals,w_face_vals
+   real(kind=8),dimension(1:nvar,1:(mx*gll+my*gll))::face_vals,w_face_vals
 
    integer::i,j,icell,jcell, ivar, intnode,jntnode
    real(kind=8)::t,t_min,theta, p_min, legendre
@@ -436,33 +435,11 @@ subroutine compute_positivity(u)
    ! compute average of states
    u_avg(1:nvar,:,:) = u(1:nvar,:,:,1,1)
    print*,'min mean density entrance', minval(u_avg(1,:,:)),  maxval(u_avg(1,:,:))
-   pause
+   !pause
    pos_nodes = nodes
    pos_nodes_n  = pos_nodes
      do icell=1,nx
        do jcell = 1,ny
-         !minimizing_set(:,:) = nodes(1,icell,jcell,:,:)
-         ! reconstruct face values too
-         !face_vals(1:mx*my) = reshape(nodes(1,icell,jcell,:,:),(/1*mx*my/))
-         !do intnode = 1,my
-        !   u_left = 0.0
-        !   u_right = 0.0
-        !   u_top = 0.0
-        !   u_bottom = 0.0
-        !   do i=1,mx
-        !     do j=1,my
-        !          u_left = u_left + u(1:nvar,icell,jcell,i,j)*legendre(chsi_left,i-1)*legendre(y_quad(intnode),j-1)
-        !          u_right = u_right + u(1:nvar,icell,jcell,i,j)*legendre(chsi_right,i-1)*legendre(y_quad(intnode),j-1)
-        !          u_top = u_top + u(1:nvar,icell,jcell,i,j)*legendre(chsi_left,j-1)*legendre(x_quad(intnode),i-1)
-        !          u_bottom = u_bottom + u(1:nvar,icell,jcell,i,j)*legendre(chsi_right,j-1)*legendre(x_quad(intnode),i-1)
-        !     end do
-        !   end do
-        !   face_vals((intnode-1)*4+1+mx*my) = u_left(1)
-        !   face_vals((intnode-1)*4+2+mx*my) = u_right(1)
-        !   face_vals((intnode-1)*4+3+mx*my) = u_top(1)
-        !   face_vals((intnode-1)*4+4+mx*my) = u_bottom(1)
-
-         !end do
          call compute_set(u(1:nvar,icell,jcell,:,:),face_vals)
          ! evaluate polynomial at other quadrature nodes too and extend minizing set
 
@@ -478,7 +455,7 @@ subroutine compute_positivity(u)
             ! else
                pos_nodes(1,icell,jcell,i,j) = u_avg(1,icell,jcell) + theta*(nodes(1,icell,jcell,i,j)-u_avg(1,icell,jcell))
                if ( pos_nodes(1,icell,jcell,i,j)<eps) then
-                 print*, 'pos nodes negative?',pos_nodes(1,icell,jcell,i,j)
+                 !print*, 'pos nodes negative?',pos_nodes(1,icell,jcell,i,j)
                end if
             ! end if
            end do
@@ -514,7 +491,7 @@ subroutine compute_positivity(u)
          !end do
 
          call compute_set(u(1:nvar,icell,jcell,:,:),face_vals)
-         do i = 1,mx*my+4*mx
+         do i = 1,gll*mx+gll*my
            call compute_primitive(face_vals(1:nvar,i),w_face_vals(1:nvar,i),1,1,1,1)
 
            !minimizing_set(:,:) = nodes(1,icell,jcell,:,:)
@@ -525,11 +502,11 @@ subroutine compute_positivity(u)
                 t = 1.
            else
                 t = solve_for_t(w_face_vals(4,i),u_avg(4,icell,jcell))
-                print*,t
+                !print*,t
                 !pause
                 !t = 0.0
            end if
-           if (t_min>t) then
+           if (t_min>=t) then
                t_min = t
            end if
          end do
@@ -537,85 +514,15 @@ subroutine compute_positivity(u)
        do i=1,mx
         do j=1,my
           pos_nodes_n(1:nvar,icell,jcell,i,j) = u_avg(1:nvar,icell,jcell) + &
-                                            &t_min*(pos_nodes(1:nvar,icell,jcell,i,j)-u_avg(1:nvar,icell,jcell))
-          !if ( pos_nodes_n(1,icell,jcell,i,j)<eps) then
-          !  pos_nodes_n(1:nvar,icell,jcell,i,j) = u(1:nvar,icell,jcell,1,1)
-          !pause
-          !end if
+                    &t_min*(pos_nodes(1:nvar,icell,jcell,i,j)-u_avg(1:nvar,icell,jcell))
          end do
        end do
        t_min = 1.
 
     end do
-   end do
-  !end do
-!end if
-
+  end do
   call get_modes_from_nodes(pos_nodes_n,modes,nx,ny,mx,my)
-  !
-  !   do icell=1,nx
-  !    do jcell = 1,ny
-  !
-  !      ! check value at faces in x direction
-  !      do intnode = 1,my
-  !        u_left = 0.0
-  !        u_right = 0.0
-  !        do i=1,mx
-  !          do j=1,my
-  !               u_left = u_left + modes(1:nvar,icell,jcell,i,j)*legendre(chsi_left,i-1)*legendre(y_quad(intnode),j-1)
-  !               u_right = u_right + modes(1:nvar,icell,jcell,i,j)*legendre(chsi_right,i-1)*legendre(y_quad(intnode),j-1)
-  !          end do
-  !        end do
-  !        call compute_primitive(u_left,w_left,1,1,1,1)
-  !         call compute_primitive(u_right,w_right,1,1,1,1)
-  !         !print*,u(1:nvar,icell,jcell,:,:)
-  !         !print*,'u_left',u_left
-  !         !print*,'u_right',u_right
-  !         !print*,'wleft',w_left
-  !         !print*,'wright', w_right
-  !         !print*,i,j,icell,jcell
-  !         if ((w_left(1)<10e-10).or.(w_left(4)<10e-10).or.(w_right(1)<10e-10).or.(w_right(4)<10e-10)) then
-  !           set_to_zero=1
-  !         end if
-  !     end do
-  !
-  !     ! check value at faces in y direction
-  !
-  !     do intnode = 1,mx
-  !       u_left = 0.0
-  !       u_right = 0.0
-  !       do i=1,mx
-  !         do j=1,my
-  !           u_left = u_left + modes(1:nvar,icell,jcell,i,j)*legendre(chsi_left,j-1)*legendre(x_quad(intnode),i-1)
-  !           u_right = u_right + modes(1:nvar,icell,jcell,i,j)*legendre(chsi_right,j-1)*legendre(x_quad(intnode),i-1)
-  !         end do
-  !       end do
-  !       call compute_primitive(u_left,w_left,1,1,1,1)
-  !       call compute_primitive(u_right,w_right,1,1,1,1)
-  !       !print*,u(1:nvar,icell,jcell,:,:)
-  !       !print*,'u_left',u_left
-  !       !print*,'u_right',u_right
-  !       !print*,'wleft',w_left
-  !       !print*,'wright', w_right
-  !       !print*,i,j,icell,jcell
-  !
-  !       if ((w_left(1)<10e-10).or.(w_left(4)<10e-10).or.(w_right(1)<10e-10).or.(w_right(4)<10e-10)) then
-  !             set_to_zero=1
-  !       end if
-  !    end do
-  !
-  !     if (set_to_zero==1) then
-  !       modes(1:nvar,icell,jcell,2:mx,2:my) = 0.0
-  !       modes(1:nvar,icell,jcell,2,2:my) = 0.0
-  !       modes(1:nvar,icell,jcell,2:mx,2) = 0.0
-  !     end if
-  !     !print*,'set to  zero', set_to_zero
-  !     set_to_zero = 0
-  !
-  !  end do
-  ! end do
-  !
-  !call get_nodes_from_modes(modes, nodes, nx,ny,mx,my)
+
   call compute_primitive(pos_nodes_n,pos_w,nx,ny,mx,my)
   print*,'maxpressure',maxval(w(4,:,:,:,:)),minval(w(4,:,:,:,:))
   print*,'maxpressure_limited',maxval(pos_w(4,:,:,:,:)),minval(pos_w(4,:,:,:,:))
@@ -630,7 +537,7 @@ subroutine compute_positivity(u)
   !call get_modes_from_nodes(nodes,modes,nx,ny,mx,my)
    print*,'minmax',maxval(abs(u-modes)),minval(abs(modes-u))
    u = modes
-   pAUSE
+   !pAUSE
 end subroutine compute_positivity
 
 
@@ -724,7 +631,7 @@ subroutine positivity_on_faces(modes)
       modes(1,icell,jcell,1,2:my) = 0.0
       modes(1,icell,jcell,2:mx,1) = 0.0
 
-      modes(4,icell,jcell,1,1)  = 0.1/(gamma-1) + 0.5*u_avg(1,icell,jcell)*(u_avg(2,icell,jcell)**2/u_avg(1,icell,jcell) +&
+      modes(4,icell,jcell,1,1)  = 1e-5/(gamma-1) + 0.5*u_avg(1,icell,jcell)*(u_avg(2,icell,jcell)**2/u_avg(1,icell,jcell) +&
       u_avg(3,icell,jcell)**2/u_avg(1,icell,jcell))
       modes(4,icell,jcell,2:mx,2:my) = 0.0
       modes(4,icell,jcell,1,2:my) = 0.0
@@ -1434,8 +1341,8 @@ function limiting(u,ivar,icell,jcell,itop,ibottom,ileft,iright,intnode,jntnode)
    !coeff_j = sqrt(2.0*dble(jntnode-2)+1.0)/sqrt(2.)*sqrt(2.0*dble(intnode-1)+1.0)/sqrt(2.)
    !coeff_i = sqrt(2.0*dble(intnode-2)+1.0)/sqrt(2.)*sqrt(2.0*dble(jntnode-1)+1.0)/sqrt(2.)
 
-   coeff_j = (2.0*dble(intnode-1)+1.0)!*(2*dble(jntnode-1)-1)
-   coeff_i = (2.0*dble(jntnode-1)+1.0)!*(2*dble(intnode-1)-1)
+   coeff_j = (2.0*dble(intnode-1)+1.0)*(2*dble(jntnode-1)-1)
+   coeff_i = (2.0*dble(jntnode-1)+1.0)*(2*dble(intnode-1)-1)
    !coeff_j = 0.5 !0.5 !sqrt(2.0*dble(jntnode-1)-1.0)/sqrt(2.0*dble(jntnode-1)+1.0)
    !coeff_i = 0.5 !0.5 !sqrt(2.0*dble(intnode-1)-1.0)/sqrt(2.0*dble(intnode-1)+1.0)
 
@@ -1553,8 +1460,8 @@ subroutine high_order_limiter(u)
   u = u_new
   u_avg = u(1:nvar,:,:,1,1)
   print*,'min mean average on HIO',minval(u_avg(1,:,:))
-  !call compute_positivity(u)
-  call limiter_pp(u)
+  call compute_positivity(u)
+  !call limiter_pp(u)
   !write(*,*) u(1,1,1,:,:)
   !pausel
 
