@@ -329,10 +329,13 @@ real(kind=8) function solve_for_t(u,u_avg)
   !b = (gamma-1)*(pa*(-Ea+Ej)+(-pa+pj)*Ea-mxa*(-mxa+mxj)-mya*(-mya+myj))-eps*(-pa+pj)
   !c = (gamma-1)*(pa*Ea-(1./2.)*mxa**2-(1./2.)*mya**2)-eps*pa
   !print*,a,b,c
+  !a = 2.0*(pj-pa)*(ej-ea) - (mxj-mxa)**2 - (myj-mya)**2
+  !b = 2.0*(pj-pa)*(ea-eps/(gamma-1)) + 2.0*pa*(ej-ea) - 2.0*(mxa*(mxj-mxa)+mya*(myj-mya))
+  !c = 2.0*pa*ea - (mxa**2+mya**2) - 2.0*eps*pa/(gamma-1.0)
+
   a = 2.0*(pj-pa)*(ej-ea) - (mxj-mxa)**2 - (myj-mya)**2
   b = 2.0*(pj-pa)*(ea-eps/(gamma-1)) + 2.0*pa*(ej-ea) - 2.0*(mxa*(mxj-mxa)+mya*(myj-mya))
   c = 2.0*pa*ea - (mxa**2+mya**2) - 2.0*eps*pa/(gamma-1.0)
-
   !q = -1./2.*(b+sign(1d0,b)*sqrt(b**2-4*a*c))
   !t1 = q/max(a,eps)!0.5*(-b-D)
   !t2 = c/max(q,eps)!0.5*(-b+D)
@@ -348,7 +351,7 @@ real(kind=8) function solve_for_t(u,u_avg)
   else if((t2 > -eps).and.(t2 < 1.0 + eps)) then
     t = t2
   else
-    !print*,'error, setting t to zero'
+    print*,'error, setting t to zero'
     t = 0.0
   end if
   !pause
@@ -357,6 +360,80 @@ real(kind=8) function solve_for_t(u,u_avg)
   solve_for_t = t
   return
 end function solve_for_t
+
+
+
+real(kind=8) function solve_for_t_iter(u,u_avg)
+  use parameters_dg_2d
+  implicit none
+  real(kind=8)::p,a,b,c, root2, root1,t1,t2,t,D,q, x_old,x_new
+  real(kind=8)::pa,mxa,mya,ea,pj,mxj,myj,ej,xx
+  real(kind=8),dimension(1:nvar)::u, u_avg
+  integer::iter
+  real(kind=8)::eps
+  eps=10e-10
+  ! compute with mapple <3
+  !a=(gamma-1)*((-pa+pj)*(-Ea+Ej)-(1/2)*(-mxa+mxj)^2-(1/2)*(-mya+myj)^2)
+  !b=
+  !c=
+  !print*,u,u_avg
+  pa = u_avg(1); mxa = u_avg(2); mya = u_avg(3); ea = u_avg(4)
+  pj = u(1); mxj = u(2); myj = u(3); ej = u(4)
+  !a = (gamma-1)*((-pa+pj)*(-Ea+Ej)-(1./2.)*(-mxa+mxj)**2-(1./2.)*(-mya+myj)**2)
+  !b = (gamma-1)*(pa*(-Ea+Ej)+(-pa+pj)*Ea-mxa*(-mxa+mxj)-mya*(-mya+myj))-eps*(-pa+pj)
+  !c = (gamma-1)*(pa*Ea-(1./2.)*mxa**2-(1./2.)*mya**2)-eps*pa
+  !print*,a,b,c
+  !a = 2.0*(pj-pa)*(ej-ea) - (mxj-mxa)**2 - (myj-mya)**2
+  !b = 2.0*(pj-pa)*(ea-eps/(gamma-1)) + 2.0*pa*(ej-ea) - 2.0*(mxa*(mxj-mxa)+mya*(myj-mya))
+  !c = 2.0*pa*ea - (mxa**2+mya**2) - 2.0*eps*pa/(gamma-1.0)
+
+  a = 2.0*(pj-pa)*(ej-ea) - (mxj-mxa)**2 - (myj-mya)**2
+  b = 2.0*(pj-pa)*(ea-eps/(gamma-1)) + 2.0*pa*(ej-ea) - 2.0*(mxa*(mxj-mxa)+mya*(myj-mya))
+  c = 2.0*pa*ea - (mxa**2+mya**2) - 2.0*eps*pa/(gamma-1.0)
+  !q = -1./2.*(b+sign(1d0,b)*sqrt(b**2-4*a*c))
+  !t1 = q/max(a,eps)!0.5*(-b-D)
+  !t2 = c/max(q,eps)!0.5*(-b+D)
+  !print*,t1,t2
+  b = b/a
+  c = c/a
+  D = sqrt(abs(b*b-4*c))
+  t1 = 0.5*(-b-D)
+  t2 = 0.5*(-b+D)
+  !print*,t1,t2
+  if((t1 > -eps) .and. (t1 < 1.0 + eps)) then
+    t = t1
+  else if((t2 > -eps).and.(t2 < 1.0 + eps)) then
+    t = t2
+  else
+    print*,'error, setting t to zero'
+    t = 0.0
+  end if
+  !pause
+  t = min(1.0,t)
+  t = max(0.0,t)
+  !print*,'t:', t
+
+  x_old = t !use root result as initial guess
+  x_new = 0.0
+  do while (abs(x_new-x_old) > eps)
+    x_new = (x_old**2 + c*a)/(2*x_old+b*a)*2.
+    x_old = x_new
+    iter = iter + 1
+    if (iter > 1000) then
+      x_new = t
+      x_old = t
+      print*,'setting t to zero'
+    end if
+  end do
+  !print*,'x_old 1',x_old
+
+  !x_old = max(x_old,c/(a*x_old))
+  !print*,'x_old 2',x_old
+  solve_for_t_iter = x_old
+  return
+end function solve_for_t_iter
+
+
 
 subroutine compute_set(modes, node_points)
   use parameters_dg_2d
@@ -388,15 +465,13 @@ subroutine compute_set(modes, node_points)
       end do
       node_points(1:nvar,(intnode-1)*gll+jntnode) = u_left(1:nvar)
       node_points(1:nvar,(intnode-1)*gll+jntnode+my*gll) = u_right(1:nvar)
-      !print*,(intnode-1)*gll+jntnode
-      !print*,(intnode-1)*gll+jntnode+my*gll
+      !print*,(intnode-1)*gll+jntnode, node_points(1:nvar,(intnode-1)*gll+jntnode)
+      !print*,(intnode-1)*gll+jntnode+my*gll, node_points(1:nvar,(intnode-1)*gll+jntnode+my*gll)
     end do
   end do
   !print*,node_points
   !pause
-  if (maxval(node_points).le.-1) then
-    print*, 'node points',node_points
-  end if
+
 end subroutine compute_set
 
 
@@ -418,7 +493,7 @@ subroutine compute_positivity(u)
 
    integer::i,j,icell,jcell, ivar, intnode,jntnode
    real(kind=8)::t,t_min,theta, p_min, legendre
-   real(kind=8)::eps, solve_for_t
+   real(kind=8)::eps, solve_for_t_iter
    eps=10e-10
    chsi_right = 1
    chsi_left = -1
@@ -439,7 +514,7 @@ subroutine compute_positivity(u)
 
    ! compute average of states
    u_avg(1:nvar,:,:) = u(1:nvar,:,:,1,1)
-   print*,'min mean density entrance', minval(u_avg(1,:,:)),  maxval(u_avg(1,:,:))
+   !print*,'min mean density entrance', minval(u_avg(1,:,:)),  maxval(u_avg(1,:,:))
    !pause
    pos_modes = u
    pos_nodes = nodes
@@ -449,10 +524,9 @@ subroutine compute_positivity(u)
          call compute_set(u(1:nvar,icell,jcell,:,:),face_vals)
          ! evaluate polynomial at other quadrature nodes too and extend minizing set
 
-         !minimizing_set(:,:) = nodes(1,icell,jcell,:,:)
-         p_min = minval(face_vals)
+
+         p_min = minval(face_vals(1,:))
          theta = min(abs((u_avg(1,icell,jcell)-eps)/(u_avg(1,icell,jcell)-p_min)),dble(1))
-          ! print*,'theta',theta
 
          do i = 1,mx
            do j = 1,my
@@ -460,6 +534,12 @@ subroutine compute_positivity(u)
             !   pos_nodes(1,icell,jcell,i,j) = 1e-5
             ! else
                !pos_nodes(1,icell,jcell,i,j) = u_avg(1,icell,jcell) + theta*(nodes(1,icell,jcell,i,j)-u_avg(1,icell,jcell))
+               !if ((icell==31).and.(jcell==51)) then
+                 !print*,'AAAA'
+                ! print*,'i,j',i,j
+                 !print*,'u', u(1:nvar,icell,jcell,i,j)
+                 !pause
+               !end if
                if ((i.ne.1).or.(j.ne.1)) then
                  !exit
                  !print*,i,j
@@ -516,7 +596,7 @@ subroutine compute_positivity(u)
            if (w_face_vals(4,i) > eps) then
                 t = 1.
            else
-                t = solve_for_t(w_face_vals(4,i),u_avg(4,icell,jcell))
+                t = solve_for_t_iter(face_vals(1:nvar,i),u_avg(1:nvar,icell,jcell))
                 !print*,t
                 !pause
                 !t = 0.0
@@ -525,7 +605,9 @@ subroutine compute_positivity(u)
                t_min = t
            end if
          end do
-         !pause
+        !pause
+
+
        do i=1,mx
         do j=1,my
           !pos_nodes_n(1:nvar,icell,jcell,i,j) = u_avg(1:nvar,icell,jcell) + &
@@ -533,9 +615,20 @@ subroutine compute_positivity(u)
           if ((i.ne.1).or.(j.ne.1)) then
             pos_modes(1:nvar,icell,jcell,i,j) = t_min*(u(1:nvar,icell,jcell,i,j))
           end if
+          !if ((icell==31).and.(jcell==51)) then
+              !print*,'AAAA'
+            !print*,'jcell,icell,avg,theta',icell,jcell,t_min
+            !print*,'rho min', p_min
+          !  print*,i,j
+          !  print*,'modes before', (u(1:nvar,icell,jcell,i,j))
+          !  print*,'modes after', pos_modes(1:nvar,icell,jcell,i,j)
+          !  pause
+          !end if
 
          end do
        end do
+
+
        t_min = 1.
 
     end do
@@ -544,20 +637,20 @@ subroutine compute_positivity(u)
   call get_nodes_from_modes(pos_modes,pos_nodes_n,nx,ny,mx,my)
 
   call compute_primitive(pos_nodes_n,pos_w,nx,ny,mx,my)
-  print*,'maxpressure',maxval(w(4,:,:,:,:)),minval(w(4,:,:,:,:))
-  print*,'maxpressure_limited',maxval(pos_w(4,:,:,:,:)),minval(pos_w(4,:,:,:,:))
-  print*,'velocities',maxval(pos_w(2,:,:,:,:)),minval(pos_w(2,:,:,:,:)),&
-  &maxval(pos_w(3,:,:,:,:)),minval(pos_w(3,:,:,:,:))
-  print*,'density',maxval(pos_w(1,:,:,:,:)),minval(pos_w(1,:,:,:,:))
+  !print*,'maxpressure',maxval(w(4,:,:,:,:)),minval(w(4,:,:,:,:))
+  !print*,'maxpressure_limited',maxval(pos_w(4,:,:,:,:)),minval(pos_w(4,:,:,:,:))
+  !print*,'velocities',maxval(pos_w(2,:,:,:,:)),minval(pos_w(2,:,:,:,:)),&
+  !&maxval(pos_w(3,:,:,:,:)),minval(pos_w(3,:,:,:,:))
+  !print*,'density',maxval(pos_w(1,:,:,:,:)),minval(pos_w(1,:,:,:,:))
   !print*,'means',minval(modes(1,:,:,1,1)),minval(modes(4,:,:,1,1))
   !pos_w(3,:,:,:,:) = 1.0
   !pos_w(2,:,:,:,:) = 0.0
   !pos_w(4,:,:,:,:) = 10e-5
   !call compute_conservative(pos_w,nodes,nx,ny,mx,my)
   !call get_modes_from_nodes(nodes,modes,nx,ny,mx,my)
-   print*,'minmax',maxval(abs(u-modes)),minval(abs(modes-u))
+   !print*,'minmax',maxval(abs(u-modes)),minval(abs(modes-u))
    u = pos_modes
-   !pAUSE
+   pAUSE
 end subroutine compute_positivity
 
 
