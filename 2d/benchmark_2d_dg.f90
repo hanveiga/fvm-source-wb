@@ -29,9 +29,7 @@ subroutine compute_error(u,x,y,t,u_anal)
 
   call get_initial_conditions(x,y,u_init,nx,ny,mx,my)
 
-  u_anal(:,:,:,:,:) = 0.0
-  u_anal(1,:,:,:,:) = u_init(1,:,:,:,:)*exp(1*t)
-  print*,'maxerror',maxval(abs(u-u_anal))
+  print*,'maxerror',maxval(abs(u(1,:,:,:,:)-u_init(1,:,:,:,:)))
 
 end subroutine compute_error
 
@@ -207,7 +205,7 @@ subroutine get_initial_conditions(x,y,u,size_x,size_y, order_x, order_y)
     ! boxlen has to be 6x6
     p_0 = 10e-5
     rho_0 = 10e-5
-    rho_d = 1
+    rho_d = 1.
     delta_r = 0.1
     x_center = 3.
     y_center = 3.
@@ -256,9 +254,9 @@ subroutine get_initial_conditions(x,y,u,size_x,size_y, order_x, order_y)
     end do
 
   case(8) ! square advection
-    p_0 = 2.5
-    rho_0 = 1.0
-    rho_d = 2.
+    p_0 = 10e-5
+    rho_0 = 10e-5
+    rho_d = 1.0
     delta_r = 0.1
     x_center = 0.5
     y_center = 0.5
@@ -327,7 +325,7 @@ case(11) ! 100% smooth rotating disk
   ! boxlen has to be 6x6
   p_0 = 10e-5
   rho_0 = 10e-5
-  rho_d = 1
+  rho_d = 1.
   delta_r = 0.1
   x_center = 3.
   y_center = 3.
@@ -537,15 +535,16 @@ end subroutine get_equilibrium_solution
 
 subroutine evolve(u, x,y, u_eq)
   ! eat real nodal values, spit out nodal values
+  ! Added 5 stage 4th order SSP RK http://epubs.siam.org/doi/pdf/10.1137/S0036142901389025
   use parameters_dg_2d
   implicit none
 
   real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx,1:my)::u,u_anal,u_eq, chars, avg_nodes
   real(kind=8),dimension(1:nx,1:ny, 1:mx,1:my)::x,y
   ! internal variables
-  real(kind=8)::t,dt
+  real(kind=8)::t,dt, gll_w_1
   real(kind=8)::cmax, dx, dy, cs_max,v_xmax,v_ymax
-  real(kind=8),dimension(1:nvar,1:nx, 1:ny,1:mx,1:my)::dudt, w, w1, w2,w3,w4, delta_u,nodes, temp
+  real(kind=8),dimension(1:nvar,1:nx, 1:ny,1:mx,1:my)::dudt, w, w1, w2,w3,w4, w5,delta_u,nodes, temp
   integer::iter, n, i, j
   integer::snap_counter
   integer::var
@@ -557,16 +556,17 @@ subroutine evolve(u, x,y, u_eq)
   call get_modes_from_nodes(u,delta_u, nx, ny, mx, my)
   call get_nodes_from_modes(delta_u,nodes, nx, ny, mx, my)
 
+  gll_w_1 = 1./dble(gll*(gll-1)) ! pretty restrictive...
   t=0
   iter=0
   snap_counter = 0
   call apply_limiter(delta_u)
   do while(t < tend)
     ! Compute time step
-    call compute_max_speed(nodes,cs_max,v_xmax,v_ymax,cmax)
+    call compute_max_speed(delta_u(:,:,:,1,1),cs_max,v_xmax,v_ymax,cmax)
     !write(*,*) 'cmax=',cmax
     write(*,*) 'csmax, umax,vmax= ', cs_max, v_xmax, v_ymax
-    dt = min(tend-t,(cfl/dble(2*4+1))/((abs(v_xmax)+(cs_max))/dx + (abs(v_ymax)+(cs_max))/dx))
+    dt = min(tend-t,cfl*min(1./dble(2*4+1),gll_w_1/2.)/((abs(v_xmax)+(cs_max))/dx + (abs(v_ymax)+(cs_max))/dx))
     if(solver=='EQL')then
 
       call compute_update(delta_u,x,y,u_eq, dudt)
@@ -593,15 +593,48 @@ subroutine evolve(u, x,y, u_eq)
       call compute_update(w3,x,y,u_eq,dudt)
       w4=0.178079954393132*delta_u+0.821920045606868*w3+0.544974750228521*dt*dudt
       call apply_limiter(w4)
-      delta_u=0.517231671970585*w2+0.096059710526147*w3+0.063692468666290*dt*dudt
+
+      !delta_u=0.517231671970585*w2+0.096059710526147*w3+0.063692468666290*dt*dudt
+      call compute_update(w3,x,y,u_eq,dudt)
+
+      !delta_u=delta_u+0.386708617503269*w4+0.226007483236906*dt*dudt
+      w5 = 0.00683325884039*delta_u + 0.51723167208978*w2+0.12759831133288*w3 + 0.34833675773694*w4 &
+                      & + 0.08460416338212*dt*dudt
+
       call compute_update(w4,x,y,u_eq,dudt)
-      delta_u=delta_u+0.386708617503269*w4+0.226007483236906*dt*dudt
+      delta_u = w5 + 0.22600748319395*dt*dudt
+
       call apply_limiter(delta_u)
+    end if
+      if(solver=='SS4')then !4th order SSP RGKT
+
+        call compute_update(delta_u,x,y,u_eq,dudt)
+        w1=delta_u+0.39175222700392*dt*dudt
+        call apply_limiter(w1)
+        !STOP
+        call compute_update(w1,x,y,u_eq,dudt)
+        w2=0.44437049406734*delta_u+0.55562950593266*w1+0.36841059262959*dt*dudt
+        call apply_limiter(w2)
+        call compute_update(w2,x,y,u_eq,dudt)
+        w3=0.6201018513854*delta_u+0.37989814861460*w2+0.25189177424738*dt*dudt
+        call apply_limiter(w3)
+        call compute_update(w3,x,y,u_eq,dudt)
+        w4= 0.17807995410773*delta_u+0.82192004589227*w3+0.54497475021237*dt*dudt
+        call apply_limiter(w4)
+
+        !delta_u=0.517231671970585*w2+0.096059710526147*w3+0.063692468666290*dt*dudt
+        call compute_update(w3,x,y,u_eq,dudt)
+        !delta_u=delta_u+0.386708617503269*w4+0.226007483236906*dt*dudt
+        w5 = 0.00683325884039*delta_u + 0.51723167208978*w2+0.12759831133288*w3 + 0.34833675773694*w4 &
+                        & + 0.08460416338212*dt*dudt
+        call compute_update(w4,x,y,u_eq,dudt)
+        delta_u = w5 + 0.22600748319395*dt*dudt
+        call apply_limiter(delta_u)
     endif
 
     if(solver=='DEB')then
       call compute_update(delta_u,x,y,u_eq,dudt)
-      w1=delta_u+0.5*dt*dudt
+      w1=delta_u+dt*dudt
       !print*,w1
       temp = w1
       call apply_limiter(w1)
@@ -635,8 +668,8 @@ subroutine evolve(u, x,y, u_eq)
 
   call get_nodes_from_modes(delta_u, nodes, nx, ny, mx, my)
   call compute_error(nodes,x,y,tend,u_anal)
-   call output_file(x,y,u_anal,var,'analytical')
-   u = nodes
+  call output_file(x,y,u_anal,var,'analytical')
+  u = nodes
 end subroutine evolve
 
 subroutine get_boundary_conditions(index, dim)
@@ -691,7 +724,7 @@ end subroutine get_boundary_conditions
 subroutine compute_max_speed(u, cs_max, v_xmax, v_ymax, speed_max)
   use parameters_dg_2d
   implicit none
-  real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::u
+  real(kind=8),dimension(1:nvar,1:nx,1:ny)::u
   integer::icell, jcell, j,i
   real(kind=8)::speed, cs, v_x, v_y, cs_max, v_xmax, v_ymax, speed_max
   real(kind=8),dimension(1:nvar)::w
@@ -704,9 +737,9 @@ subroutine compute_max_speed(u, cs_max, v_xmax, v_ymax, speed_max)
   cs_max = 0.0
   do icell=1,nx
     do jcell = 1,ny
-      do i=1,mx
-        do j=1,my
-          call compute_speed(u(1:nvar,icell,jcell,i,j),cs,v_x,v_y,speed)
+      !do i=1,mx
+      !  do j=1,my
+          call compute_speed(u(1:nvar,icell,jcell),cs,v_x,v_y,speed)
           if (speed >= speed_max) then
             speed_max=MAX(speed_max,speed)
             v_xmax = v_x
@@ -715,7 +748,7 @@ subroutine compute_max_speed(u, cs_max, v_xmax, v_ymax, speed_max)
             iloc = icell
             jloc = jcell
             !cs_max = sqrt(1.4)
-            call compute_primitive(u(1:nvar,icell,jcell,i,j),w,1,1,1,1)
+            call compute_primitive(u(1:nvar,icell,jcell),w,1,1,1,1)
           end if
           if (velo_max_x>v_x) then
             velo_max_x = v_x
@@ -727,8 +760,8 @@ subroutine compute_max_speed(u, cs_max, v_xmax, v_ymax, speed_max)
           if (cs_maxi>cs) then
             cs_maxi = cs
           end if
-        end do
-      end do
+        !end do
+      !end do
     end do
   end do
   print*,'max speed and location',iloc,jloc,velo_max_y,velo_max_x,cs_maxi,cs_max
@@ -849,6 +882,42 @@ subroutine compute_llflux(uleft,uright, f_left,f_right, fgdnv, flag)
   fgdnv=0.5*(f_right+f_left)+0.5*cmax*(uleft-uright)
 end subroutine compute_llflux
 !-----
+
+subroutine compute_num_flux(uleft,uright, f_left,f_right, numflux, flag)
+  use parameters_dg_2d
+  implicit none
+  real(kind=8),dimension(1:nvar)::uleft,uright, f_left, f_right
+  real(kind=8),dimension(1:nvar)::numflux
+  real(kind=8),dimension(1:nvar)::fleft,fright
+  integer::flag
+  ! Maximum wave speed
+  if (flux_type == 'llf') then
+    call compute_llflux(uleft,uright, f_left,f_right, numflux, flag)
+  else if (flux_type == 'hll') then
+    call compute_hllflux(uleft,uright, f_left,f_right, numflux, flag)
+  end if
+end subroutine compute_num_flux
+
+subroutine compute_hllflux(uleft,uright, f_left,f_right, fhll, flag)
+  use parameters_dg_2d
+  implicit none
+  real(kind=8),dimension(1:nvar)::uleft,uright, f_left, f_right
+  real(kind=8),dimension(1:nvar)::fhll
+  real(kind=8)::cs_r,v_x_r,v_y_r,speed_right,cs_l,v_x_l,v_y_l,speed_left
+  real(kind=8)::a_plus, a_minus
+  real(kind=8),dimension(1:nvar)::fleft,fright
+  integer::flag
+  ! Maximum wave speed
+  call compute_speed(uleft,cs_l,v_x_l,v_y_l,speed_left)
+  call compute_speed(uright,cs_r,v_x_r,v_y_r,speed_right)
+
+  !subroutine compute_speed(u,cs,v_x,v_y,speed)
+  !cmax=max(speed_left,speed_right)
+  a_plus = max(0.,max(cs_l+sqrt((v_x_l**2+v_y_l**2)),cs_r+sqrt((v_x_r**2+v_y_r**2))))
+  a_minus = max(0.,max(-(cs_l-sqrt((v_x_l**2+v_y_l**2))),-(cs_r-sqrt((v_x_r**2+v_y_r**2)))))
+  ! Compute Godunox flux
+  fhll = (a_plus*f_left + a_minus*f_right -a_plus*a_minus*(uright-uleft))/(a_plus + a_minus)
+end subroutine compute_hllflux
 
 subroutine compute_update(delta_u,x,y,u_eq,dudt)
   use parameters_dg_2d
@@ -1056,7 +1125,7 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
 
       ! subroutine compute_llflux(uleft,uright, f_left,f_right, fgdnv)
       do intnode = 1, my
-        call compute_llflux(u_right(1:nvar,ileft,j,1,intnode),u_left(1:nvar,iright,j,1,intnode),&
+        call compute_num_flux(u_right(1:nvar,ileft,j,1,intnode),u_left(1:nvar,iright,j,1,intnode),&
         &flux_right(1:nvar,ileft,j,1,intnode,1),&
         &flux_left(1:nvar,iright,j,1,intnode,1),F(1:nvar,1,intnode,iface,j),1)
       end do
@@ -1073,7 +1142,7 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
       call get_boundary_conditions(iright,2)
 
       do intnode = 1, mx
-        call compute_llflux(u_top(1:nvar,i,ileft,intnode,1),u_bottom(1:nvar,i,iright,intnode,1),&
+        call compute_num_flux(u_top(1:nvar,i,ileft,intnode,1),u_bottom(1:nvar,i,iright,intnode,1),&
         &flux_top(1:nvar,i,ileft,intnode,1,2),&
         &flux_bottom(1:nvar,i,iright,intnode,1,2),G(1:nvar,intnode,1,i,jface),2)
       end do
@@ -1174,8 +1243,8 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
           &-oneoverdx*(edge(1:nvar,icell,jcell,i,j,1)&
           &-edge(1:nvar,icell,jcell,i,j,2)) &
           &-oneoverdx*(edge(1:nvar,icell,jcell,i,j,3)&
-          &-edge(1:nvar,icell,jcell,i,j,4))) !&
-          !& + source_vol(1:nvar,icell,jcell,i,j)/4.
+          &-edge(1:nvar,icell,jcell,i,j,4)))/2. &
+          & + source_vol(1:nvar,icell,jcell,i,j)/4.
         end do
       end do
     end do
