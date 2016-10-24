@@ -416,7 +416,7 @@ real(kind=8) function solve_for_t_iter(u,u_avg)
   x_old = t !use root result as initial guess
   x_new = 0.0
   do while (abs(x_new-x_old) > eps)
-    x_new = (x_old**2 + c*a)/(2*x_old+b*a)*2.
+    x_new = 2*(x_old**2 + c*a)/(2*x_old+b*a)
     x_old = x_new
     iter = iter + 1
     if (iter > 1000) then
