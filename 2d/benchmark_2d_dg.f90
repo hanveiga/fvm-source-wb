@@ -650,11 +650,6 @@ subroutine evolve(u, x,y, u_eq)
 
     call get_nodes_from_modes(delta_u, nodes, nx, ny, mx, my)
 
-    !call compute_characteristics(nodes,chars,nx,ny,mx,my)
-    !avg_nodes = nodes
-    !call compute_cons_from_characteristics(chars,avg_nodes,nodes,nx,ny,mx,my)
-    !print*, maxval(avg_nodes - nodes),minval(avg_nodes - nodes)
-    !STOP
     if ((make_movie).and.(MODULO(iter,interval)==0)) then
       var = 1
       snap_counter = snap_counter + 1
@@ -779,7 +774,7 @@ subroutine compute_speed(u,cs,v_x,v_y,speed)
   call compute_primitive(u,w,1,1,1,1)
   ! Compute sound speed
 
-  cs=sqrt(gamma*max(w(4),1d-10)/max(w(1),1d-10))
+  cs=sqrt(gamma*max(w(4),eps)/max(w(1),eps))
   !cs = sqrt(1.4)
   v_x = w(2)
   v_y = w(3)
@@ -823,10 +818,6 @@ subroutine compute_flux(u,flux1, flux2, size_x,size_y,order_x,order_y)
   real(kind=8),dimension(1:nvar,1:size_x,1:size_y,1:order_x,1:order_y)::w
   ! Compute primitive variables
   call compute_primitive(u,w,size_x,size_y,order_x,order_y)
-  ! Compute flux
-  !    write(*,*) 'cons', maxval(u)
-
-  !    write(*,*) 'prim', maxval(w)
 
   flux2(1,:,:,:,:)=w(1,:,:,:,:)*w(3,:,:,:,:)
   flux2(2,:,:,:,:)=w(1,:,:,:,:)*w(2,:,:,:,:)*w(3,:,:,:,:)
@@ -921,7 +912,6 @@ subroutine compute_hllflux(uleft,uright, f_left,f_right, fhll, flag)
 end subroutine compute_hllflux
 
 
-
 subroutine compute_hllcflux(uleft,uright, f_left, f_right, fhllc, flag)
   use parameters_dg_2d
   implicit none
@@ -939,10 +929,6 @@ subroutine compute_hllcflux(uleft,uright, f_left, f_right, fhllc, flag)
   call compute_speed(uleft,cs_l,v_x_l,v_y_l,speed_left)
   call compute_speed(uright,cs_r,v_x_r,v_y_r,speed_right)
 
-  ! compute SL, SM, SR
-
-  !print*,'i am running guys'
-  !
   v_l = sqrt((v_x_l**2+v_y_l**2))
   v_r = sqrt((v_x_r**2+v_y_r**2))
 
@@ -1143,8 +1129,7 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
       do i=1,mx
         do j=1,my
           do intnode = 1,mx
-            !u_delta_b(1:nvar,intnode) = u_delta_b(1:nvar, intnode) +delta_u(1:nvar,icell,jcell,i,j)*&
-            !&legendre(chsi_bottom,j-1)*legendre(x_quad(intnode),i-1)
+
             u_delta_b(1:nvar,intnode) = u_delta_b(1:nvar, intnode) + delta_u(1:nvar,icell,jcell,i,j)*&
             & legendre(chsi_bottom,j-1)*legendre(x_quad(intnode),i-1)
 
@@ -1153,8 +1138,7 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
           end do
         end do
       end do
-      !write(*,*) legendre(chsi_left,1)
-      !write(*,*) delta_u(1:nvar,icell,jcell,1,1)
+
       u_delta_bottom(1:nvar,icell,jcell,:) = u_delta_b(1:nvar,:) !(u_delta_r+u_delta_l)/2. - (uu_r+uu_l)/2.
       u_delta_top(1:nvar,icell,jcell,:) = u_delta_t(1:nvar,:) !(u_delta_r+u_delta_l)/2. - (uu_r+uu_l)/2.
 
@@ -1402,8 +1386,6 @@ subroutine get_adv_source(u,s,x,y)
   real(kind=8),dimension(1:nx,1:ny,1:mx,1:my)::x,y
 
   call compute_primitive(u,w,nx,ny,mx,my)
-  !call grad_phi(u,x,y,grad_p)
-
   s(1,:,:,:,:) = -1.0*u(1,:,:,:,:)
   s(2,:,:,:,:) = 0.0
   s(3,:,:,:,:) = 0.0
@@ -1434,7 +1416,6 @@ subroutine grad_phi(u,x,y, grad_p)
     delta_r = 0.1
     x_center = 3.
     y_center = 3.
-
     do icell = 1,nx
       do jcell = 1,ny
         do i = 1,mx
@@ -1457,7 +1438,7 @@ subroutine grad_phi(u,x,y, grad_p)
     end do
   end select
 
-end subroutine
+end subroutine grad_phi
 
 subroutine compute_characteristics(u,chars,size_x,size_y,order_x,order_y)
   use parameters_dg_2d
@@ -1494,7 +1475,6 @@ subroutine compute_characteristics(u,chars,size_x,size_y,order_x,order_y)
   end do
 
 end subroutine compute_characteristics
-
 
 subroutine compute_cons_from_characteristics(chars,u,u_new,size_x,size_y,order_x,order_y)
   use parameters_dg_2d
