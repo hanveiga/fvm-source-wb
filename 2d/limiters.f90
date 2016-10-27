@@ -316,8 +316,8 @@ real(kind=8) function solve_for_t(u,u_avg)
   real(kind=8)::pa,mxa,mya,ea,pj,mxj,myj,ej,xx
   real(kind=8),dimension(1:nvar)::u, u_avg
   integer::iter
-  real(kind=8)::eps
-  eps=10e-10
+  !real(kind=8)::eps
+  !eps=10e-10
   ! compute with mapple <3
   !a=(gamma-1)*((-pa+pj)*(-Ea+Ej)-(1/2)*(-mxa+mxj)^2-(1/2)*(-mya+myj)^2)
   !b=
@@ -370,8 +370,8 @@ real(kind=8) function solve_for_t_iter(u,u_avg)
   real(kind=8)::pa,mxa,mya,ea,pj,mxj,myj,ej,xx
   real(kind=8),dimension(1:nvar)::u, u_avg
   integer::iter
-  real(kind=8)::eps
-  eps=10e-10
+  !real(kind=8)::eps
+  !eps=10e-10
   ! compute with mapple <3
   !a=(gamma-1)*((-pa+pj)*(-Ea+Ej)-(1/2)*(-mxa+mxj)^2-(1/2)*(-mya+myj)^2)
   !b=
@@ -493,8 +493,8 @@ subroutine compute_positivity(u)
 
    integer::i,j,icell,jcell, ivar, intnode,jntnode
    real(kind=8)::t,t_min,theta, p_min, legendre
-   real(kind=8)::eps, solve_for_t_iter
-   eps=10e-10
+   real(kind=8)::solve_for_t
+   !eps=10e-10
    chsi_right = 1
    chsi_left = -1
    set_to_zero = 0
@@ -596,7 +596,7 @@ subroutine compute_positivity(u)
            if (w_face_vals(4,i) > eps) then
                 t = 1.
            else
-                t = solve_for_t_iter(face_vals(1:nvar,i),u_avg(1:nvar,icell,jcell))
+                t = solve_for_t(face_vals(1:nvar,i),u_avg(1:nvar,icell,jcell))
                 !print*,t
                 !pause
                 !t = 0.0
@@ -650,7 +650,7 @@ subroutine compute_positivity(u)
   !call get_modes_from_nodes(nodes,modes,nx,ny,mx,my)
    !print*,'minmax',maxval(abs(u-modes)),minval(abs(modes-u))
    u = pos_modes
-   pAUSE
+   !pAUSE
 end subroutine compute_positivity
 
 
@@ -664,8 +664,8 @@ subroutine positivity_on_faces(modes)
 
   integer::i,j,icell,jcell, ivar, intnode,jntnode
   real(kind=8)::legendre
-  real(kind=8)::eps
-  eps=10e-10
+  !real(kind=8)::eps
+  !eps=10e-10
   chsi_right = 1
   chsi_left = -1
   set_to_zero = 0
@@ -1483,7 +1483,7 @@ subroutine high_order_limiter(u)
     real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::nodes, modes
     real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::chars, chars_m, u_temp
     real(kind=8),dimension(1:nvar,1:nx,1:ny)::u_avg
-    real(kind=8)::limited,limited2,limiting,eps,generalized_minmod
+    real(kind=8)::limited,limited2,limiting,generalized_minmod
     real(kind=8)::d_l_x, d_l_y, d_r_x, d_r_y
     real(kind=8)::coeff,coeff_u,minmod, coeff_x, coeff_y
     integer::i,j,icell,jcell, ivar, itop,ibottom,ileft,iright
@@ -1497,7 +1497,7 @@ subroutine high_order_limiter(u)
       !use_limiter = .false.
       return
     end if
-    eps = 10e-10
+    !eps = 10e-10
     u_new = u
 
     do ivar = 1,nvar
@@ -1725,14 +1725,14 @@ subroutine high_order_limiter(u)
     real(kind=8),dimension(1:nvar)::maximum_neigh_value_1, minimum_neigh_value_1
 
     integer,dimension(1:9)::indices_i,indices_j
-    real(kind=8)::u_left, eps, max_temp, min_temp, vs
+    real(kind=8)::u_left, max_temp, min_temp, vs
     real(kind=8)::limited1,limited2, generalized_minmod, minmod, legendre, dx, ratio, phi_lim
     integer::i,j,icell,jcell, ivar, itop,ibottom,ileft,iright
     integer::intnode, jntnode, indx
     integer::left,right,bottom,top, component
 
     dx = boxlen_x/dble(nx)
-    eps = 10e-10
+    !eps = 10e-10
 
     ! transform to nodes
     !call get_nodes_from_modes(u, u_nodes, nx, ny, mx, my)
