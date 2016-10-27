@@ -793,9 +793,9 @@ subroutine compute_primitive(u,w,size_x,size_y,order_x,order_y)
   real(kind=8),dimension(1:nvar,1:size_x,1:size_y, 1:order_x,1:order_y)::u
   real(kind=8),dimension(1:nvar,1:size_x,1:size_y, 1:order_x,1:order_y)::w
   ! Compute primitive variables
-  w(1,:,:,:,:) = u(1,:,:,:,:)
-  w(2,:,:,:,:) = u(2,:,:,:,:)/u(1,:,:,:,:)
-  w(3,:,:,:,:) = u(3,:,:,:,:)/u(1,:,:,:,:)
+  w(1,:,:,:,:) = max(u(1,:,:,:,:),eps)
+  w(2,:,:,:,:) = u(2,:,:,:,:)/w(1,:,:,:,:)
+  w(3,:,:,:,:) = u(3,:,:,:,:)/w(1,:,:,:,:)
   w(4,:,:,:,:) = (gamma-1.0)*( u(4,:,:,:,:) - 0.5*w(1,:,:,:,:)*(w(2,:,:,:,:)**2+w(3,:,:,:,:)**2) )
 end subroutine compute_primitive
 
@@ -893,8 +893,10 @@ subroutine compute_num_flux(uleft,uright, f_left,f_right, numflux, flag)
   ! Maximum wave speed
   if (flux_type == 'llf') then
     call compute_llflux(uleft,uright, f_left,f_right, numflux, flag)
-  else if (flux_type == 'hll') then
+  else if (flux_type == 'hll2') then
     call compute_hllflux(uleft,uright, f_left,f_right, numflux, flag)
+  else if (flux_type == 'hllc') then
+    call compute_hllcflux(uleft,uright,f_left,f_right, numflux, flag)
   end if
 end subroutine compute_num_flux
 
@@ -910,7 +912,6 @@ subroutine compute_hllflux(uleft,uright, f_left,f_right, fhll, flag)
   ! Maximum wave speed
   call compute_speed(uleft,cs_l,v_x_l,v_y_l,speed_left)
   call compute_speed(uright,cs_r,v_x_r,v_y_r,speed_right)
-
   !subroutine compute_speed(u,cs,v_x,v_y,speed)
   !cmax=max(speed_left,speed_right)
   a_plus = max(0.,max(cs_l+sqrt((v_x_l**2+v_y_l**2)),cs_r+sqrt((v_x_r**2+v_y_r**2))))
@@ -918,6 +919,71 @@ subroutine compute_hllflux(uleft,uright, f_left,f_right, fhll, flag)
   ! Compute Godunox flux
   fhll = (a_plus*f_left + a_minus*f_right -a_plus*a_minus*(uright-uleft))/(a_plus + a_minus)
 end subroutine compute_hllflux
+
+
+
+subroutine compute_hllcflux(uleft,uright, f_left, f_right, fhllc, flag)
+  use parameters_dg_2d
+  implicit none
+  real(kind=8),dimension(1:nvar)::uleft,uright, f_left, f_right
+  real(kind=8),dimension(1:nvar)::fhllc, wright, wleft, ustarleft, ustarright, uhllc
+  real(kind=8)::cs_r,v_x_r,v_y_r,speed_right,cs_l,v_x_l,v_y_l,speed_left
+  real(kind=8)::a_plus, a_minus
+  real(kind=8)::v_l,v_r,SR,SL,SM,pstar
+  real(kind=8),dimension(1:nvar)::fleft,fright
+  integer::flag
+  ! Maximum wave speed
+  call compute_primitive(uleft,wleft,1,1,1,1)
+  call compute_primitive(uright,wright,1,1,1,1)
+
+  call compute_speed(uleft,cs_l,v_x_l,v_y_l,speed_left)
+  call compute_speed(uright,cs_r,v_x_r,v_y_r,speed_right)
+
+  ! compute SL, SM, SR
+
+  !print*,'i am running guys'
+  !
+  v_l = sqrt((v_x_l**2+v_y_l**2))
+  v_r = sqrt((v_x_r**2+v_y_r**2))
+
+  SL = min(v_l,v_r)-max(cs_l,cs_r)
+  SR = max(v_l,v_r)-max(cs_l,cs_r)
+
+  SM = (wright(1)*v_l*(SR-v_l)-wleft(1)*v_r*(SL-v_l)+wleft(4)-wright(4))&
+        &/(wright(1)*(SR-v_l)-wleft(1)*(SL-v_l))
+
+  pstar = wleft(1)*(v_l-SL)*(v_l-SM)+wleft(4)
+
+  ustarleft(1) = uleft(1)*(SL-v_l)/(SL-SM)
+  ustarleft(2) = ((SL-v_l)*uleft(1)*wleft(2)+(pstar-wleft(4)))/(SL-SM)
+  ustarleft(3) = ((SL-v_l)*uleft(1)*wleft(3)+(pstar-wleft(4)))/(SL-SM)
+  ustarleft(4) = ((SL-v_l)*uleft(4)-wleft(4)*v_l+(pstar-wleft(4)))/(SL-SM)
+
+  ustarright(1) = uright(1)*(SR-v_r)/(SR-SM)
+  ustarright(2) = ((SR-v_r)*uright(1)*wright(2)+(pstar-wright(4)))/(SR-SM)
+  ustarright(3) = ((SR-v_r)*uright(1)*wright(3)+(pstar-wright(4)))/(SR-SM)
+  ustarright(4) = ((SR-v_r)*uright(4)-wright(4)*v_r+(pstar-wright(4)))/(SR-SM)
+
+  if (SL>0.0) then ! x direction
+    uhllc = uleft
+  else if((SL.le.0).and.(SM>0)) then ! y direction
+    uhllc = ustarleft
+  else if((SR.ge.0).and.(SM.le.0)) then ! y direction
+    uhllc= ustarright
+  else if((SR<0)) then ! y direction
+    uhllc = uright
+  end if
+
+  call compute_flux(uhllc,f_left,f_right,1,1,1,1)
+
+  if (flag==1) then
+    fhllc = f_left
+  else if (flag==2) then
+    fhllc = f_right
+  end if
+
+end subroutine compute_hllcflux
+
 
 subroutine compute_update(delta_u,x,y,u_eq,dudt)
   use parameters_dg_2d
@@ -1097,6 +1163,7 @@ subroutine compute_update(delta_u,x,y,u_eq,dudt)
       u_top(1:nvar,icell,jcell,:,1) = u_delta_top(1:nvar,icell,jcell,:)
     end do
   end do
+  print*,'why u dont print'
 
   ! fluxes
   F(:,:,:,:,:) = 0.
@@ -1391,381 +1458,6 @@ subroutine grad_phi(u,x,y, grad_p)
   end select
 
 end subroutine
-
-
-
-
-subroutine compute_update_edit(u,x,y,u_eq,dudt)
-  use parameters_dg_2d
-  implicit none
-  real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx, 1:my)::u,dudt
-  real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx, 1:my)::u_eq !useless
-  real(kind=8),dimension(1:nvar,1, 1:mx, 1:nx+1, 1:ny)::F
-  real(kind=8),dimension(1:nvar,1:mx, 1, 1:nx, 1:ny+1)::G
-
-  real(kind=8),dimension(1:nx,1:ny, 1:mx, 1:my)::x,y
-  real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx, 1:my)::s, source_vol
-  !===========================================================
-  ! This routine computes the DG update for the input state u.
-  !===========================================================
-  real(kind=8),dimension(1:nx,1:ny, 1:mx, 1:my, 1:nx+1,1:ny+1)::x_faces, y_faces
-  real(kind=8),dimension(1:nvar,1:mx,1:my)::u_quad,source_quad
-
-  real(kind=8),dimension(1:nvar):: u_temp
-  real(kind=8),dimension(1:nvar,2):: flux_temp
-  real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::u_nodes
-  real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::flux_quad1
-  real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx,1:my)::flux_quad2
-
-
-  real(kind=8),dimension(1:nvar,1:nx,1:ny, 1:mx, 1:my)::flux_vol1, flux_vol2
-  real(kind=8),dimension(1:nvar, 1:nx,1:ny,1,1:my)::u_left,u_right
-  real(kind=8),dimension(1:nvar, 1:nx,1:ny,1:mx,1)::u_top, u_bottom
-  real(kind=8),dimension(1:nvar, 1:nx,1:ny,1:mx,1,2)::flux_top, flux_bottom
-
-  real(kind=8),dimension(1:nvar)::flux_riemann,u_tmp
-  real(kind=8),dimension(1:nvar,1:nx+1,1:ny+1)::flux_face,flux_face_eq
-  real(kind=8),dimension(1:nvar, 1:nx, 1:ny, 1, 1:my, 2)::flux_left,flux_right
-  real(kind=8),dimension(1:nvar, 1:nx, 1:ny, 1:mx, 1:my, 4):: edge
-
-  integer::icell,i,j,iface,ileft,iright,ivar, node, jface
-  integer::intnode,jntnode,jcell, edge_num, one
-
-  real(kind=8)::legendre,legendre_prime
-  real(kind=8)::chsi_left=-1,chsi_right=+1
-  real(kind=8)::chsi_bottom=-1,chsi_top=+1
-  real(kind=8)::dx,dy
-  real(kind=8)::cmax,oneoverdx,c_left,c_right,oneoverdy
-  real(kind=8)::x_right,x_left
-
-  real(kind=8),dimension(1:nvar,1:mx):: u_delta_r, u_delta_l, u_delta_t, u_delta_b
-  real(kind=8),dimension(1:nvar,1:nx,1:ny,1:mx)::u_delta_left,u_delta_right,u_delta_top,u_delta_bottom
-  real(kind=8),dimension(1:nvar,1:(nx+1))::u_face_eq, w_face_eq
-
-  dx=boxlen_x/dble(nx)
-  dy=boxlen_y/dble(ny)
-  oneoverdx=1./dble(dx)
-  oneoverdy=1./dble(dy)
-
-  call gl_quadrature(x_quad,w_x_quad,mx)
-  call gl_quadrature(y_quad,w_y_quad,my)
-
-  ! get equilibrium quantities
-
-  !==================================
-  ! Compute volume integral for Flux
-  !==================================
-
-  u_nodes = 0.0
-  flux_vol1 = 0.0
-  flux_vol2 = 0.0
-  !flux_quad(:,:,:,:,:,:) = 0.0
-
-  call get_nodes_from_modes(u,u_nodes,nx,ny,mx,my)
-  call compute_flux(u_nodes,flux_quad1,flux_quad2,nx,ny,mx,my)
-  write(*,*) 'unodes', maxval(u_nodes)
-  write(*,*) 'fluxquad_1', maxval(flux_quad1)
-  write(*,*) 'fluxquad_2', maxval(flux_quad2)
-
-  write(*,*) 'fluxquad_1', minval(flux_quad1)
-  write(*,*) 'fluxquad_2', minval(flux_quad2)
-
-  do icell=1,nx
-    do jcell=1,ny
-      !==================================
-      ! Compute flux at quadrature points
-      !==================================
-      !write(*,*) u_delta_quad
-      !================================
-      ! Compute volume integral DG term
-      !================================
-      ! Loop over modes
-      do i = 1,mx
-        do j = 1,my
-          flux_vol1(1:nvar,icell,jcell,i,j) = 0.0
-          do intnode=1,mx
-            do jntnode=1,my
-              flux_vol1(1:nvar,icell,jcell,i,j)=flux_vol1(1:nvar,icell,jcell,i,j)+ &
-              & 0.25*flux_quad1(1:nvar,icell,jcell,intnode,jntnode)* & ! x direction
-              & legendre_prime(x_quad(intnode),i-1)* &
-              & w_x_quad(intnode)*&
-              & legendre(y_quad(jntnode),j-1)* &
-              & w_y_quad(jntnode)! * dx*dy/4.
-            end do
-          end do
-
-          do intnode=1,mx
-            do jntnode=1,my
-              flux_vol2(1:nvar,icell,jcell,i,j) = flux_vol2(1:nvar,icell,jcell,i,j)&
-              & + 0.25*flux_quad2(1:nvar,icell,jcell,intnode,jntnode)* & !y direction
-              & legendre_prime(y_quad(jntnode),j-1)* &
-              & w_y_quad(jntnode)*&
-              & legendre(x_quad(intnode),i-1)* &
-              & w_x_quad(intnode)! * dx*dy/4.
-            end do
-          end do
-        end do
-      end do
-    end do
-  end do
-
-
-  write(*,*) 'fluxvol_1', maxval(flux_vol1)
-  write(*,*) 'fluxvol_2', maxval(flux_vol2)
-  write(*,*) 'fluxvol_1', minval(flux_vol1)
-  write(*,*) 'fluxvol_2', minval(flux_vol2)
-
-  u_delta_l(:,:) = 0.0
-  u_delta_r(:,:) = 0.0
-  u_delta_t(:,:) = 0.0
-  u_delta_b(:,:) = 0.0
-
-
-  do icell=1,nx
-    do jcell=1,ny
-      !==============================
-      ! Compute left and right states
-      ! computing the value AT the node -1 and 1
-      !==============================
-      !u_delta(1:nvar,icell)=0.0
-      ! Loop over modes
-      u_delta_l = 0.
-      u_delta_r = 0.
-      do i=1,mx
-        do j=1,my
-          do intnode = 1,my
-            u_delta_l(1:nvar, intnode) = u_delta_l(1:nvar, intnode) + u(1:nvar,icell,jcell,i,j)*&
-            &legendre(chsi_left,i-1)*legendre(y_quad(intnode),j-1)
-            u_delta_r(1:nvar, intnode) = u_delta_r(1:nvar, intnode) + u(1:nvar,icell,jcell,i,j)*&
-            &legendre(chsi_right,i-1)*legendre(y_quad(intnode),j-1)
-          end do
-        end do
-      end do
-      u_delta_left(1:nvar,icell,jcell,:) = u_delta_l(1:nvar,:) !(u_delta_r+u_delta_l)/2. - (uu_r+uu_l)/2.
-      u_delta_right(1:nvar,icell,jcell,:) = u_delta_r(1:nvar,:) !(u_delta_r+u_delta_l)/2. - (uu_r+uu_l)/2.
-
-      ! compute equilibrium on the fly
-      u_left(1:nvar,icell,jcell,1,:) = u_delta_left(1:nvar,icell,jcell,:)
-      u_right(1:nvar,icell,jcell,1,:) = u_delta_right(1:nvar,icell,jcell,:)
-    end do
-  end do
-
-  do icell=1,nx
-    do jcell=1,ny
-      !==============================
-      ! Compute left and right states
-      ! computing the value AT the node -1 and 1
-      !==============================
-      !u_delta(1:nvar,icell)=0.0
-      ! Loop over modes
-      u_delta_b = 0.
-      u_delta_t = 0.
-      do i=1,mx
-        do j=1,my
-          do intnode = 1,mx
-            !u_delta_b(1:nvar,intnode) = u_delta_b(1:nvar, intnode) +delta_u(1:nvar,icell,jcell,i,j)*&
-            !&legendre(chsi_bottom,j-1)*legendre(x_quad(intnode),i-1)
-            u_delta_b(1:nvar,intnode) = u_delta_b(1:nvar, intnode) + u(1:nvar,icell,jcell,i,j)*&
-            & legendre(chsi_bottom,j-1)*legendre(x_quad(intnode),i-1)
-
-            u_delta_t(1:nvar,intnode) = u_delta_t(1:nvar, intnode) + u(1:nvar,icell,jcell,i,j)*&
-            & legendre(chsi_top,j-1)*legendre(x_quad(intnode),i-1)
-          end do
-        end do
-      end do
-      !write(*,*) legendre(chsi_left,1)
-      !write(*,*) delta_u(1:nvar,icell,jcell,1,1)
-      u_delta_bottom(1:nvar,icell,jcell,:) = u_delta_b(1:nvar,:) !(u_delta_r+u_delta_l)/2. - (uu_r+uu_l)/2.
-      u_delta_top(1:nvar,icell,jcell,:) = u_delta_t(1:nvar,:) !(u_delta_r+u_delta_l)/2. - (uu_r+uu_l)/2.
-
-      ! compute equilibrium on the fly
-      u_bottom(1:nvar,icell,jcell,:,1) = u_delta_bottom(1:nvar,icell,jcell,:)
-      u_top(1:nvar,icell,jcell,:,1) = u_delta_top(1:nvar,icell,jcell,:)
-    end do
-  end do
-
-  write(*,*) 'ub', maxval(u_bottom)
-  write(*,*) 'ub', minval(u_bottom)
-  write(*,*) 'ut', maxval(u_top)
-  write(*,*) 'ut', minval(u_top)
-  write(*,*) 'ul', maxval(u_left)
-  write(*,*) 'ul', minval(u_left)
-  write(*,*) 'ur', maxval(u_right)
-  write(*,*) 'ur', minval(u_right)
-
-  ! fluxes
-  F(:,:,:,:,:) = 0.
-  G(:,:,:,:,:) = 0.
-  one = 1
-  do icell = 1,nx
-    do jcell = 1,ny
-      do i = 1,mx
-        !do j = 1,my
-        call compute_flux_int(u_left(1:nvar,icell,jcell,1,i),flux_left(1:nvar,icell,jcell,1,i,:))
-        call compute_flux_int(u_right(1:nvar,icell,jcell,1,i),flux_right(1:nvar,icell,jcell,1,i,:))
-        call compute_flux_int(u_top(1:nvar,icell,jcell,i,1),flux_top(1:nvar,icell,jcell,i,1,:))
-        call compute_flux_int(u_bottom(1:nvar,icell,jcell,i,1),flux_bottom(1:nvar,icell,jcell,i,1,:))
-        ! compute artificial flux in x direction
-      end do
-    end do
-  end do
-
-
-  do j = 1, ny
-    do iface = 1, nx+1
-      ileft = iface-1
-      iright = iface
-
-      call get_boundary_conditions(ileft,1)
-      call get_boundary_conditions(iright,1)
-
-      ! subroutine compute_llflux(uleft,uright, f_left,f_right, fgdnv)
-      do intnode = 1, my
-        call compute_llflux(u_right(1:nvar,ileft,j,1,intnode),u_left(1:nvar,iright,j,1,intnode),&
-        &flux_right(1:nvar,ileft,j,1,intnode,1),&
-        &flux_left(1:nvar,iright,j,1,intnode,1),F(1:nvar,1,intnode,iface,j),1)
-      end do
-
-    end do
-  end do
-
-  write(*,*) 'F', maxval(F)
-  write(*,*) 'F', minval(F)
-
-  do i = 1,nx
-    do jface = 1,ny+1
-      ileft = jface-1
-      iright = jface
-
-      call get_boundary_conditions(ileft,2)
-      call get_boundary_conditions(iright,2)
-
-      do intnode = 1, mx
-        write(*,*) 'ileft', ileft
-        write(*,*) 'iright', iright
-        write(*,*) 'intnode',intnode
-        write(*,*) 'i', i
-        write(*,*) 'u', u(1:nvar,i,ileft,intnode,1)
-        write(*,*) 'utop', u_top(1:nvar,i,ileft,intnode,1)
-        write(*,*) 'ubottom', u_bottom(1:nvar,i,iright,intnode,1)
-        call compute_llflux(u_top(1:nvar,i,ileft,intnode,1),u_bottom(1:nvar,i,iright,intnode,1),&
-        &flux_top(1:nvar,i,ileft,intnode,1,2),&
-        &flux_bottom(1:nvar,i,iright,intnode,1,2),G(1:nvar,intnode,1,i,jface),2)
-        write(*,*) 'G',G(1:nvar,intnode,1,i,jface)
-
-      end do
-    end do
-  end do
-
-
-
-  write(*,*) 'G', maxval(G)
-  write(*,*) 'G', minval(G)
-
-  !========================
-  ! Compute flux line integral
-  !========================
-  ! Loop over cells]
-  edge(:,:,:,:,:,:)=0.0
-  do icell = 1,nx
-    do jcell = 1,ny
-      do i = 1,mx
-        do j = 1, my
-          do intnode = 1,mx
-            edge(1:nvar,icell,jcell,i,j, 1) = &
-            &edge(1:nvar,icell,jcell,i,j, 1) + &
-            &0.5*F(1:nvar,1, intnode, icell + 1, jcell)*&
-            &legendre(chsi_right,i-1)*legendre(x_quad(intnode),j-1)*w_x_quad(intnode)!&
-            !&* dx/2.
-
-            edge(1:nvar,icell,jcell,i,j,2) = &
-            &edge(1:nvar,icell,jcell,i,j,2) + &
-            &0.5*F(1:nvar,1, intnode, icell, jcell)*&
-            &legendre(chsi_left,i-1)*legendre(x_quad(intnode),j-1)*w_x_quad(intnode)!&
-            !&* dx/2.
-          end do
-        end do
-      end do
-
-      do i = 1,mx
-        do j =1,my
-          do intnode = 1,my
-            !edge(1:nvar,icell,jcell,i,j,3) = &
-            !&edge(1:nvar,icell,jcell,i,j, 3) + &
-            !&G(1:nvar, intnode, 1, icell, jcell+1)*legendre(chsi_right,j-1)*legendre(x_quad(intnode),i-1)*w_x_quad(intnode)
-
-            edge(1:nvar,icell,jcell,i,j,3) = &
-            &edge(1:nvar,icell,jcell,i,j,3) + &
-            &0.5*G(1:nvar,intnode, 1, icell, jcell+1)*legendre(chsi_right,j-1)*legendre(x_quad(intnode),i-1)*w_x_quad(intnode)!&
-            !&* dx/2.
-
-            edge(1:nvar,icell,jcell,i,j,4) = &
-            &edge(1:nvar,icell,jcell,i,j,4) + &
-            &0.5*G(1:nvar, intnode, 1, icell, jcell)*legendre(chsi_left,j-1)*legendre(x_quad(intnode),i-1)*w_x_quad(intnode)!&
-            !&* dx/2.
-          end do
-        end do
-      end do
-    end do
-  end do
-  write(*,*) 'edge',maxval(edge),minval(edge)
-  !write(*,*) 'end edge'
-
-
-  source_vol(:,:,:,:,:) = 0.0
-  select case (source)
-  case(1)
-    WRITE(*,*) 'No source'
-  case(2) ! sine wave (tend=1 or 10)
-    s = 0.0
-    ! evaluate integral
-    do icell=1,nx
-      do jcell = 1,ny
-        do i=1,mx
-          do j=1,my
-            do intnode=1,mx
-              do jntnode=1,my
-                source_vol(1:nvar,icell,jcell,i,j) = source_vol(1:nvar,icell,jcell,i,j) + &
-                & 0.25*s(1:nvar,icell,jcell,intnode,jntnode)* &
-                & legendre(x_quad(intnode),i-1)* &
-                & w_x_quad(intnode)*&
-                & legendre(y_quad(jntnode),j-1)* &
-                & w_y_quad(jntnode)
-              end do
-            end do
-          end do
-        end do
-      end do
-    end do
-  end select
-  !write(*,*) 'max source', maxval(source_vol)
-  !========================
-  ! Compute final DG update
-  !========================
-  ! Loop over cells
-  dudt(1:nvar,:,:,:,:) = 0.0
-  do icell=1,nx
-    do jcell=1,ny
-      ! Loop over modes
-      do i=1,mx
-        do j=1,my
-          dudt(1:nvar,icell,jcell,i,j) = & !oneoverdx*flux_vol(1:nvar,icell,jcell,i,j) &
-          & oneoverdx*flux_vol1(1:nvar,icell,jcell,i,j) &
-          & + oneoverdx*flux_vol2(1:nvar,icell,jcell,i,j) &
-          &-oneoverdx*(edge(1:nvar,icell,jcell,i,j,1)&
-          &-edge(1:nvar,icell,jcell,i,j,2)) &
-          &-oneoverdx*(edge(1:nvar,icell,jcell,i,j,3)&
-          &-edge(1:nvar,icell,jcell,i,j,4)) !&
-          !& + source_vol(1:nvar,icell,jcell,i,j)
-        end do
-      end do
-    end do
-  end do
-  !write(*,*) flux_vol(1,1,1,:,:)
-  write(*,*) 'maxdudt',maxval(dudt)
-  write(*,*) 'mindudt',minval(dudt)
-
-end subroutine compute_update_edit
 
 subroutine compute_characteristics(u,chars,size_x,size_y,order_x,order_y)
   use parameters_dg_2d
